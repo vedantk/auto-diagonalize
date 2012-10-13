@@ -2,11 +2,11 @@
 #include <cstdlib>
 #include <cstdint>
 
-int fib(int n) {
-	int a = 1;
-	int b = 1;
+double fib(int n) {
+	double a = 1;
+	double b = 1;
 	for (int i=2; i <= n; ++i) {
-		int tmp = a;
+		double tmp = a;
 		a = b;
 		b = tmp + b;
 	}
@@ -20,6 +20,6 @@ int main(int argc, char** argv) {
 	}
 
 	int n = atoi(argv[1]);
-	printf("fib(%d) = %d\n", n, fib(n));
+	printf("fib(%d) = %lf\n", n, fib(n));
 	return 0;
 }

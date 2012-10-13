@@ -4,12 +4,11 @@
 
 #include "llvm/Pass.h"
 #include "llvm/Function.h"
+#include "llvm/Constants.h"
 #include "llvm/Instructions.h"
 #include "llvm/ValueSymbolTable.h"
 #include "llvm/Analysis/LoopInfo.h"
-
-#include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/ValueMap.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -17,13 +16,14 @@ using namespace llvm;
 namespace
 {
 
-typedef SmallVector<BasicBlock*, 4> BlockVector;
-
 struct ADPass : public FunctionPass {
 	Loop* loop;
 	LoopInfo* LI;
-	BasicBlock *loop_exit, *loop_hdr;
-	StringMap<bool> sysVars, loopSysVars;
+	BasicBlock* backedge; /* -> loop_hdr */
+	BasicBlock* loop_hdr; /* -> loop_exit */
+	BasicBlock* loop_exit; /* (-> loop_hdr) | (-> exit) */
+	Constant* iter_base; /* Initial value of the iterator. */
+	ValueMap<Value*, Constant*> x0; /* Initial system state. */
 
 	static char ID;
 
@@ -34,19 +34,8 @@ struct ADPass : public FunctionPass {
 	}
 
 	virtual bool runOnFunction(Function& F) {
-		/* XXX */
-		// errs() << F;
-		/* XXX */
-
-		bool changed = false;
 		LI = &getAnalysis<LoopInfo>();
-
-		ValueSymbolTable fvals = F.getValueSymbolTable();
-		for (auto it = fvals.begin(); it != fvals.end(); ++it) {
-			/* Initially, we optimistically assume that every
-			 * variable in the function symtable is a parameter. */
-			sysVars.GetOrCreateValue(it->getKey(), true);
-		}
+		ValueSymbolTable& symtab = F.getValueSymbolTable();
 
 		for (auto bb = F.begin(), e = F.end(); bb != e; ++bb) {
 			if (!(loop = LI->getLoopFor(bb))) {
@@ -67,62 +56,113 @@ struct ADPass : public FunctionPass {
 				continue;
 			}
 
-			BlockVector lextent;
-			lextent.push_back(loop_hdr);
-
-			/* Our loop must be contiguous, and nest nothing. */
+			/* Only handle loops with a header and one backedge. */
 			++bb;
-			bool defectiveLoop = false;
-			while (static_cast<BasicBlock*>(bb) != loop_exit) {
-				if (LI->getLoopFor(bb) != loop) {
-					defectiveLoop = true;
-					break;
-				}
-				lextent.push_back(bb);
-				++bb;
-			}
-			if (defectiveLoop) {
+			if (static_cast<BasicBlock*>(bb) != loop_exit) {
 				continue;
 			}
-			lextent.push_back(loop_exit);
-
-			/* Copy the Function's sysVars: not every toplevel
-			 * loop in the function must share the same state. */
-			loopSysVars = StringMap<bool>(sysVars);
-			changed |= processLoop(lextent);
-		}
-
-		return changed;
-	}
-
-	bool processLoop(BlockVector& lextent) {
-		for (auto bb = lextent.begin(); bb != lextent.end(); ++bb) {
-			BasicBlock* blk = *bb;
 
 			/* XXX */
-			errs() << *blk << "\n";
-			/* XXX */
+			errs() << *loop_hdr << *loop_exit << "\n";
 
-			for (auto it = blk->begin(); it != blk->end(); ++it) {
-				if (sysInconsistent(it)) {
-					return false;
-				}
+			if (transformLoop(symtab)) {
+				return true;
 			}
 		}
 
-		errs() << "------------------------------------------\n";
 		return false;
 	}
 
-	bool sysInconsistent(Instruction* instr) {
-		if (isa<PHINode>(instr)) {
+	bool transformLoop(ValueSymbolTable& symtab) {
+		backedge = *pred_begin(loop_hdr);
+		for (auto kv = symtab.begin(); kv != symtab.end(); ++kv) {
+			Value* val = kv->getValue();
 
-		} else if (isa<ReturnInst>(instr)) {
+			/* XXX */
+			errs() << kv->getKey() << "\n";
+			errs() << ":: " << *val << "\n";
 
-		} else if (isa<BinaryOperator>(instr)) {
+			if (isa<PHINode>(val)) {
+				PHINode* PN = cast<PHINode>(val);
 
+				/* We only want to deal with simple phi nodes. */
+				if (PN->getNumIncomingValues() != 2) {
+					continue;
+				}
+
+				checkIncomingBlock(PN, PN->getIncomingBlock(0));
+				checkIncomingBlock(PN, PN->getIncomingBlock(1));
+			}
 		}
-		return true;
+
+		if (checkCmps(loop_hdr) || checkCmps(loop_exit)) {
+			return false;
+		}
+
+		return false;
+	}
+
+	void checkIncomingBlock(PHINode* PN, BasicBlock* incoming) {
+		/* If the phi has an incoming value from outside of the loop,
+		 * we can tentatively call it a system parameter. */
+		if (incoming != loop_hdr && incoming != loop_exit) {
+			Value* val = PN->getIncomingValueForBlock(incoming);
+			if (isa<Constant>(val)) {
+				if (!x0.count(PN)) {
+					x0[PN] = cast<Constant>(val);
+				} else {
+					/* If there is a conflicting constant, give up. */
+					x0.erase(PN);
+				}
+			}
+		}
+	}
+
+	bool checkCmps(BasicBlock* blk) {
+		/* System parameters may not be in comparisons, though the loop
+		 * iterator should be. Check if the iterator is sane. */
+		bool hasiter = false;
+		for (auto it = blk->begin(); it != blk->end(); ++it) {
+			Instruction* instr = static_cast<Instruction*>(it);
+			if (isa<CmpInst>(instr)) {
+				hasiter |= checkCmpOperand(instr->getOperand(0));
+				hasiter |= checkCmpOperand(instr->getOperand(1));
+			}
+		}
+		return hasiter;
+	}
+
+	bool checkCmpOperand(Value* val) {
+		/* Determine whether or not this CMP operand is an iterator, and
+		 * remove it from the initial system state if it's in there. */
+		PHINode* CPN;
+		if (isa<PHINode>(val)) {
+			CPN = cast<PHINode>(val);
+		} else {
+			return false;
+		}
+		
+		if (x0.count(CPN)) {
+			iter_base = x0[CPN];
+			x0.erase(CPN);
+		}
+
+		if (Instruction* Ins =
+			dyn_cast<Instruction>(CPN->getIncomingValueForBlock(backedge)))
+		{
+			if (Ins->getOpcode() == Instruction::Add
+				&& Ins->getOperand(0) == CPN)
+			{
+				if (ConstantInt* CI =
+					dyn_cast<ConstantInt>(Ins->getOperand(1)))
+				{
+					if (CI->equalsInt(1)) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 };
 
