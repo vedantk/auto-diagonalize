@@ -1,0 +1,5 @@
+*.bc
+*.bc.diag
+*.out
+*.o
+*.so

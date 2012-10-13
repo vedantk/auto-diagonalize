@@ -1,0 +1,15 @@
+auto-diagonalize
+================
+
+`auto-diagonalize' is an optimization pass written for LLVM.
+
+Its purpose is to find loops that posess the characteristics of linear
+dynamical systems, and replace them (if possible*) with a closed-form
+representation of the system.
+
+The goal is to be able to transform simple O(n) algorithms, such as the
+iterative fibonacci number generator, into O(lg(n)) algorithms.
+
+----------------------------------------------------------------------------
+
+* The (n x n) transformation matrix of the system must have n eigenvectors.
