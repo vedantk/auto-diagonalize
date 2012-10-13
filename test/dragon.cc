@@ -2,6 +2,12 @@
 #include <cstdlib>
 #include <cstdint>
 
+void foo(int n) {
+	if (n % 100 == 0) {
+		puts("Beep.");
+	}
+}
+
 int dragon(int n) {
 	int a = 8;
 	int b = 4;
@@ -13,6 +19,7 @@ int dragon(int n) {
 		a = ap;
 		b = bp;
 		c = cp;
+		foo(n);
 	}
 	return a;
 }
@@ -24,6 +31,6 @@ int main(int argc, char** argv) {
 	}
 
 	int n = atoi(argv[1]);
-	printf("dragon(%ld) = %ld\n", n, dragon(n));
+	printf("dragon(%d) = %d\n", n, dragon(n));
 	return 0;
 }

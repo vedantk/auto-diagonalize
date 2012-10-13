@@ -20,6 +20,6 @@ int main(int argc, char** argv) {
 	}
 
 	int n = atoi(argv[1]);
-	printf("fib(%ld) = %ld\n", n, fib(n));
+	printf("fib(%d) = %d\n", n, fib(n));
 	return 0;
 }

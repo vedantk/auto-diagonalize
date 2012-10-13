@@ -1,5 +1,5 @@
 CXX = clang++
-CXXFLAGS = `llvm-config --cxxflags`
+CXXFLAGS = -std=c++11 `llvm-config --cxxflags`
 
 diagonalize.so: diagonalize.o
 	$(CXX) -shared -Wl,-soname,$@ -o $@ $^
