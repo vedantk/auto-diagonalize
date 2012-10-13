@@ -19,6 +19,7 @@ namespace
 struct ADPass : public FunctionPass {
 	Loop* loop;
 	LoopInfo* LI;
+	DominatorTree* DT;
 	BasicBlock* backedge; /* -> loop_hdr */
 	BasicBlock* loop_hdr; /* -> loop_exit */
 	BasicBlock* loop_exit; /* (-> loop_hdr) | (-> exit) */
@@ -31,10 +32,15 @@ struct ADPass : public FunctionPass {
 
 	virtual void getAnalysisUsage(AnalysisUsage& AU) const {
 		AU.addRequired<LoopInfo>();
+		AU.addRequired<DominatorTree>();
 	}
 
 	virtual bool runOnFunction(Function& F) {
+		errs() << F;
+
+		x0.clear();
 		LI = &getAnalysis<LoopInfo>();
+		DT = &getAnalysis<DominatorTree>();
 		ValueSymbolTable& symtab = F.getValueSymbolTable();
 
 		for (auto bb = F.begin(), e = F.end(); bb != e; ++bb) {
@@ -62,9 +68,6 @@ struct ADPass : public FunctionPass {
 				continue;
 			}
 
-			/* XXX */
-			errs() << *loop_hdr << *loop_exit << "\n";
-
 			if (transformLoop(symtab)) {
 				return true;
 			}
@@ -78,12 +81,11 @@ struct ADPass : public FunctionPass {
 		for (auto kv = symtab.begin(); kv != symtab.end(); ++kv) {
 			Value* val = kv->getValue();
 
-			/* XXX */
-			errs() << kv->getKey() << "\n";
-			errs() << ":: " << *val << "\n";
-
 			if (isa<PHINode>(val)) {
 				PHINode* PN = cast<PHINode>(val);
+				if (PN->getParent() != loop_hdr) {
+					continue;
+				}
 
 				/* We only want to deal with simple phi nodes. */
 				if (PN->getNumIncomingValues() != 2) {
@@ -95,8 +97,12 @@ struct ADPass : public FunctionPass {
 			}
 		}
 
-		if (checkCmps(loop_hdr) || checkCmps(loop_exit)) {
+		if (!checkCmps(loop_hdr) && !checkCmps(loop_exit)) {
 			return false;
+		}
+
+		for (auto kv = x0.begin(); kv != x0.end(); ++kv) {
+			errs() << *kv->first << " : " << *kv->second << "\n";
 		}
 
 		return false;
@@ -105,7 +111,7 @@ struct ADPass : public FunctionPass {
 	void checkIncomingBlock(PHINode* PN, BasicBlock* incoming) {
 		/* If the phi has an incoming value from outside of the loop,
 		 * we can tentatively call it a system parameter. */
-		if (incoming != loop_hdr && incoming != loop_exit) {
+		if (DT->dominates(incoming, loop_hdr)) {
 			Value* val = PN->getIncomingValueForBlock(incoming);
 			if (isa<Constant>(val)) {
 				if (!x0.count(PN)) {
@@ -132,20 +138,44 @@ struct ADPass : public FunctionPass {
 		return hasiter;
 	}
 
+	PHINode* traverseToKnownPhi(Value* val) {
+		/* Given an operand of an instruction, traverse up the basic block
+		 * until you can resolve the value to a known PHI node. */
+		if (val == NULL) {
+			return NULL;
+		} else if (isa<PHINode>(val)) {
+			PHINode* VPN = cast<PHINode>(val);
+			if (x0.count(VPN)) {
+				return VPN;
+			}
+		} else if (isa<Instruction>(val)) {
+			Instruction* ins = cast<Instruction>(val);
+
+			/* Be careful not to traverse too far up. */
+			if (DT->properlyDominates(ins->getParent(), loop_hdr)) {
+				return NULL;
+			}
+
+			for (size_t i=0; i < ins->getNumOperands(); ++i) {
+				PHINode* opval = traverseToKnownPhi(ins->getOperand(i));
+				if (opval) {
+					return opval;
+				}
+			}
+		}
+		return NULL;
+	}
+
 	bool checkCmpOperand(Value* val) {
 		/* Determine whether or not this CMP operand is an iterator, and
 		 * remove it from the initial system state if it's in there. */
-		PHINode* CPN;
-		if (isa<PHINode>(val)) {
-			CPN = cast<PHINode>(val);
-		} else {
+		PHINode* CPN = traverseToKnownPhi(val);
+		if (CPN == NULL) {
 			return false;
 		}
-		
-		if (x0.count(CPN)) {
-			iter_base = x0[CPN];
-			x0.erase(CPN);
-		}
+
+		iter_base = x0[CPN];
+		x0.erase(CPN);
 
 		if (Instruction* Ins =
 			dyn_cast<Instruction>(CPN->getIncomingValueForBlock(backedge)))
