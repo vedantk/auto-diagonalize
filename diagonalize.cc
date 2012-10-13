@@ -4,6 +4,7 @@
 
 #include "llvm/Pass.h"
 #include "llvm/Function.h"
+#include "llvm/Instructions.h"
 #include "llvm/ValueSymbolTable.h"
 #include "llvm/Analysis/LoopInfo.h"
 
@@ -21,8 +22,8 @@ typedef SmallVector<BasicBlock*, 4> BlockVector;
 struct ADPass : public FunctionPass {
 	Loop* loop;
 	LoopInfo* LI;
-	StringMap<bool> sysVars;
 	BasicBlock *loop_exit, *loop_hdr;
+	StringMap<bool> sysVars, loopSysVars;
 
 	static char ID;
 
@@ -85,6 +86,9 @@ struct ADPass : public FunctionPass {
 			}
 			lextent.push_back(loop_exit);
 
+			/* Copy the Function's sysVars: not every toplevel
+			 * loop in the function must share the same state. */
+			loopSysVars = StringMap<bool>(sysVars);
 			changed |= processLoop(lextent);
 		}
 
@@ -92,12 +96,33 @@ struct ADPass : public FunctionPass {
 	}
 
 	bool processLoop(BlockVector& lextent) {
-		/* Copy the Function's sysVars: not every toplevel loop 
-		 * in the function must share the same parameters. */
-		StringMap<bool> loop_sysVars(sysVars);
-		errs() << "processLoop: " << lextent.size() << "\n";
+		for (auto bb = lextent.begin(); bb != lextent.end(); ++bb) {
+			BasicBlock* blk = *bb;
 
+			/* XXX */
+			errs() << *blk << "\n";
+			/* XXX */
+
+			for (auto it = blk->begin(); it != blk->end(); ++it) {
+				if (sysInconsistent(it)) {
+					return false;
+				}
+			}
+		}
+
+		errs() << "------------------------------------------\n";
 		return false;
+	}
+
+	bool sysInconsistent(Instruction* instr) {
+		if (isa<PHINode>(instr)) {
+
+		} else if (isa<ReturnInst>(instr)) {
+
+		} else if (isa<BinaryOperator>(instr)) {
+
+		}
+		return true;
 	}
 };
 
