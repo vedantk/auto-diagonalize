@@ -27,6 +27,12 @@ int main() {
 	MatrixXcd Pinv = P.inverse();
 	MatrixXcd S = (P * D * Pinv);
 
+	cout << F << endl
+		<< P << endl
+		<< Pinv << endl
+		<< D << endl
+		<< S << endl;
+
 	cout << "fib(" << fib << "):\n";
 	cout << S << endl;
 	printf("%.0f\n", round(real(S(1, 1))));

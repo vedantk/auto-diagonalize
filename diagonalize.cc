@@ -11,7 +11,13 @@
 #include "llvm/ADT/ValueMap.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <Eigen/Core>
+#include <Eigen/LU>
+#include <Eigen/Eigenvalues>
+#include <Eigen/Dense>
+
 using namespace llvm;
+using namespace Eigen;
 
 namespace
 {
@@ -101,8 +107,28 @@ struct ADPass : public FunctionPass {
 			return false;
 		}
 
+		errs() << "*** Results for initial state vector; ***\n";
 		for (auto kv = x0.begin(); kv != x0.end(); ++kv) {
 			errs() << *kv->first << " : " << *kv->second << "\n";
+		}
+
+		size_t n = x0.size();
+		MatrixXd T(n, n);
+		for (auto it = loop_hdr->begin(); it != loop_hdr->end(); ++it) {
+			Instruction* instr = static_cast<Instruction*>(it);
+			if (isa<BinaryOperator>(instr)) {
+
+			} else if (isa<PHINode>(instr)) {
+
+			} else if (isa<StoreInst>(instr)) {
+
+			} else if (isa<UnaryInstruction>(instr)) {
+
+			} else if (isa<CmpInst>(instr)) {
+				continue;
+			} else {
+				return false;
+			}
 		}
 
 		return false;
