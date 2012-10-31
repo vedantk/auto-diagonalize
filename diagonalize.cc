@@ -26,7 +26,6 @@ namespace
 struct ADPass : public LoopPass
 {
     Loop* loop;
-    DominatorTree* DT; /* XXX */
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop iterator and state variables. */
@@ -38,9 +37,7 @@ struct ADPass : public LoopPass
 
     ADPass() : LoopPass(ID) {}
 
-    virtual void getAnalysisUsage(AnalysisUsage& AU) const {
-        AU.addRequired<DominatorTree>();
-    }
+    virtual void getAnalysisUsage(AnalysisUsage&) const {}
 
     bool extractIterator(ICmpInst* icmp) {
         /* In canonical form, LLVM should pass us an ICmp with the predicate
@@ -52,56 +49,63 @@ struct ADPass : public LoopPass
                                       m_Value(cmpRhs)))
             && IPred == CmpInst::Predicate::ICMP_EQ)
         {
+            if (isa<Instruction>(cmpRhs)) {
+                Instruction* irhs = cast<Instruction>(cmpRhs);
+
+                errs() << *irhs->getParent() << "\n";
+
+                /* loop->contains(irhs) causes bizarre segfaults */
+                if (!(std::find(blocks.begin(), blocks.end(),
+                    irhs->getParent()) == blocks.end()))
+                {
+                    return false;
+                }
+            }
+
             Value *incrLhs, *incrRhs;
             if (match(cmpLhs, m_Add(m_Value(incrLhs), m_Value(incrRhs)))) {
                 if (isa<PHINode>(incrLhs)
                     && isa<ConstantInt>(incrRhs)
-                    && cast<ConstantInt>(incrRhs)->isOne()
-                    && cmpRhs->isUsedInBasicBlock(loop->getLoopPredecessor()))
+                    && cast<ConstantInt>(incrRhs)->isOne())
                 {
                     iter_var = cast<PHINode>(incrLhs);
                     iter_final = cmpRhs;
+                    errs() << "all good! in extract\n";
                     return true;
                 }
             }
         }
+        errs() << "oh shit\n";
         return false;
     }
 
     virtual bool runOnLoop(Loop* loop, LPPassManager&) {
-        errs() << "In runOnLoop\n";
-
         if (loop->getSubLoops().size()) {
-            errs() << "subloops = " << loop->getSubLoops().size() << "\n";
             return false;
         }
 
         if (!loop->getUniqueExitBlock()) {
-            errs() << "no unique exit block\n";
             return false;
         }
 
         blocks = loop->getBlocks();
 
         errs() << "***** Loop contents *****\n";
-        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
-            errs() << *it << "\n";
+        for (size_t i=0; i < blocks.size(); ++i) {
+            errs() << *blocks[i] << "\n";
         }
         errs() << "***** Loop contents *****\n";
-
-        errs() << "Basic sanity checks done\n";
 
         /* Filter away loops with invalid instructions. */
         int nr_cmps = 0;
         ICmpInst* icmp = NULL;
         SmallPtrSet<PHINode*, 4> phis;
-        for (auto BI = blocks.begin(); BI != blocks.end(); ++BI) {
-            BasicBlock* BB = *BI;
+        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
+            BasicBlock* BB = *it;
             for (auto II = BB->begin(); II != BB->end(); ++II) {
                 Instruction* instr = static_cast<Instruction*>(II);
                 if (isa<ICmpInst>(instr)) {
                     if (++nr_cmps > 1) {
-                        errs() << "Found too many cmps\n";
                         return false;
                     } else {
                         icmp = cast<ICmpInst>(instr);
@@ -109,7 +113,6 @@ struct ADPass : public LoopPass
                 } else if (isa<PHINode>(instr)) {
                     PHINode* PN = cast<PHINode>(instr);
                     if (PN->getNumIncomingValues() != 2) {
-                        errs() << "PHI " << PN << " has too in edges\n";
                         return false;
                     } else {
                         phis.insert(PN);
@@ -119,28 +122,25 @@ struct ADPass : public LoopPass
                     if (!(binop->getOpcode() >= Instruction::Add
                         && binop->getOpcode() <= Instruction::FDiv))
                     {
-                        errs() << "Blacklisted binop; " << binop << "\n";
                         return false;
                     }
                 } else if (!(isa<BranchInst>(instr)
                             || isa<IndirectBrInst>(instr)))
                 {
-                    errs() << "Bizarre unexpected instr; " << instr << "\n";
                     return false;
                 }
             }
         }
 
         /* Extract the induction variable if possible. */
-        DT = &getAnalysis<DominatorTree>(); /* XXX */
-        if (icmp == NULL || !extractIterator(icmp)) {
+        if (!extractIterator(icmp)) {
             return false;
         } else {
             phis.erase(iter_var);
         }
 
         for (auto it = phis.begin(); it != phis.end(); ++it) {
-            errs() << *it << "\n";
+            errs() << **it << "\n";
         }
 
         return false;
