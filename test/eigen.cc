@@ -12,6 +12,10 @@ using namespace Eigen;
 int main() {
 	int fib = 42;
 
+	MatrixXcd T;
+
+	T = MatrixXcd(3, 3);
+
 	MatrixXd F(2, 2);
 	F(0, 0) = 0;
 	F(0, 1) = 1;

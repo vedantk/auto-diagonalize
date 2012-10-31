@@ -1,0 +1,74 @@
+define double @_Z3fibi(i32 %n) nounwind uwtable {
+  %1 = alloca i32, align 4
+  %a = alloca double, align 8
+  %b = alloca double, align 8
+  %i = alloca i32, align 4
+  %tmp = alloca double, align 8
+  store i32 %n, i32* %1, align 4
+  store double 1.000000e+00, double* %a, align 8
+  store double 1.000000e+00, double* %b, align 8
+  store i32 2, i32* %i, align 4
+  br label %2
+
+; <label>:2                                       ; preds = %12, %0
+  %3 = load i32* %i, align 4
+  %4 = load i32* %1, align 4
+  %5 = icmp sle i32 %3, %4
+  br i1 %5, label %6, label %15
+
+; <label>:6                                       ; preds = %2
+  %7 = load double* %a, align 8
+  store double %7, double* %tmp, align 8
+  %8 = load double* %b, align 8
+  store double %8, double* %a, align 8
+  %9 = load double* %tmp, align 8
+  %10 = load double* %b, align 8
+  %11 = fadd double %9, %10
+  store double %11, double* %b, align 8
+  br label %12
+
+; <label>:12                                      ; preds = %6
+  %13 = load i32* %i, align 4
+  %14 = add nsw i32 %13, 1
+  store i32 %14, i32* %i, align 4
+  br label %2
+
+; <label>:15                                      ; preds = %2
+  %16 = load double* %b, align 8
+  ret double %16
+}
+
+define i32 @main(i32 %argc, i8** %argv) uwtable {
+  %1 = alloca i32, align 4
+  %2 = alloca i32, align 4
+  %3 = alloca i8**, align 8
+  %n = alloca i32, align 4
+  store i32 0, i32* %1
+  store i32 %argc, i32* %2, align 4
+  store i8** %argv, i8*** %3, align 8
+  %4 = load i32* %2, align 4
+  %5 = icmp ne i32 %4, 2
+  br i1 %5, label %6, label %8
+
+; <label>:6                                       ; preds = %0
+  %7 = call i32 @puts(i8* getelementptr inbounds ([22 x i8]* @.str, i32 0, i32 0))
+  store i32 1, i32* %1
+  br label %17
+
+; <label>:8                                       ; preds = %0
+  %9 = load i8*** %3, align 8
+  %10 = getelementptr inbounds i8** %9, i64 1
+  %11 = load i8** %10, align 8
+  %12 = call i32 @atoi(i8* %11) nounwind readonly
+  store i32 %12, i32* %n, align 4
+  %13 = load i32* %n, align 4
+  %14 = load i32* %n, align 4
+  %15 = call double @_Z3fibi(i32 %14)
+  %16 = call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i32 0, i32 0), i32 %13, double %15)
+  store i32 0, i32* %1
+  br label %17
+
+; <label>:17                                      ; preds = %8, %6
+  %18 = load i32* %1
+  ret i32 %18
+}
