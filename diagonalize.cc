@@ -71,6 +71,8 @@ struct ADPass : public LoopPass
     }
 
     virtual bool runOnLoop(Loop* L, LPPassManager&) {
+        loop = L;
+        
         if (loop->getSubLoops().size()) {
             return false;
         }
@@ -79,7 +81,6 @@ struct ADPass : public LoopPass
             return false;
         }
 
-        loop = L;
         blocks = loop->getBlocks();
 
         /* Filter away loops with invalid instructions. */
@@ -98,6 +99,10 @@ struct ADPass : public LoopPass
                     }
                 } else if (isa<PHINode>(instr)) {
                     PHINode* PN = cast<PHINode>(instr);
+                    /* XXX:
+                     * Ensure that the LHS incoming value comes from outside
+                     * of the loop, and that it's a Constant.
+                     */
                     if (PN->getNumIncomingValues() != 2) {
                         return false;
                     } else {
@@ -113,6 +118,10 @@ struct ADPass : public LoopPass
                 } else if (!(isa<BranchInst>(instr)
                             || isa<IndirectBrInst>(instr)))
                 {
+                    /* XXX:
+                     * Be more stringent about the branches we allow, the
+                     * BasicBlock chain has to be simple.
+                     */
                     return false;
                 }
             }
@@ -124,11 +133,19 @@ struct ADPass : public LoopPass
         } else {
             phis.erase(iter_var);
         }
-
+        
+        /* XXX:
+         * Iterate over the PHI nodes, examining their update values from the
+         * bottom-up. Ensure there are no non-linear dependencies. N.B: the values
+         * we see from the bottom-up are the 'old' versions of the state variables.
+         */
+        MatrixXcd(phis.size(), phis.size());
         for (auto it = phis.begin(); it != phis.end(); ++it) {
             errs() << **it << "\n";
+            
+            
         }
-
+        
         return false;
     }
 };
