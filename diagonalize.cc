@@ -7,7 +7,7 @@
 #include "llvm/Constants.h"
 #include "llvm/Instructions.h"
 #include "llvm/Analysis/LoopPass.h"
-#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/ValueMap.h"
 #include "llvm/Support/PatternMatch.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -15,6 +15,9 @@
 #include <Eigen/LU>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
+
+#include <cmath>
+#include <limits>
 
 using namespace llvm;
 using namespace PatternMatch;
@@ -28,11 +31,10 @@ struct ADPass : public LoopPass
     Loop* loop;
     DominatorTree* DT;
     std::vector<BasicBlock*> blocks;
-
-    /* Track the loop range, iterator, and transformation matrix. */
     int64_t iter_base;
     Value* iter_final;
     PHINode* iter_var;
+    ValueMap<PHINode*, int> phis;
     MatrixXcd TransformationMatrix;
 
     static char ID;
@@ -55,11 +57,11 @@ struct ADPass : public LoopPass
         loop = L;
         blocks = loop->getBlocks();
         DT = &getAnalysis<DominatorTree>();
+        phis.clear();
         
         /* Filter away loops with unsupported instructions. */
         int nr_cmps = 0;
         ICmpInst* icmp = NULL;
-        SmallPtrSet<PHINode*, 4> phis;
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
             BasicBlock* BB = *it;
             for (auto II = BB->begin(); II != BB->end(); ++II) {
@@ -82,7 +84,7 @@ struct ADPass : public LoopPass
                     if (!isa<Constant>(inLhs)) {
                         return false;
                     } else {
-                        phis.insert(PN);
+                        phis[PN] = -1;
                     }
                 } else if (isa<BinaryOperator>(instr)) {
                     BinaryOperator* binop = cast<BinaryOperator>(instr);
@@ -105,24 +107,31 @@ struct ADPass : public LoopPass
         } else {
             phis.erase(iter_var);
         }
+
+        int phi_index = 0;
+        for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
+            errs() << "PHINode: " << *kv->first << "\n\t Label: " << phi_index << "\n";
+            phis[kv->first] = phi_index++;
+        }
         
         /* Find the initial state and all linear dependence relations. */
         int count = 0;
         MatrixXd InitialState = MatrixXd(phis.size(), 1);
         TransformationMatrix = MatrixXcd(phis.size(), phis.size());
-        for (auto it = phis.begin(); it != phis.end(); ++it) {
-            PHINode* PN = *it;
-            try {
-                InitialState(count, 0) = DoubleFromValue(PN->getIncomingValue(0));
-            } catch (int) {
+        for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
+            PHINode* PN = kv->first;
+            double n = DoubleFromValue(PN->getIncomingValue(0));
+            if (std::isnan(n)) {
                 return false;
             }
+            InitialState(count, 0) = n;
             if (!trackUpdates(count, PN)) {
                 return false;
             }
             ++count;
         }
 
+#if 0
         /* XXX:
          * How do we check if complex eigenvalues were generated? Avoid this case...
          */
@@ -135,6 +144,7 @@ struct ADPass : public LoopPass
          * Perform P * (D^[iter_final]) * Pinv * InitialState, and assign the final
          * values back into the state variables.
          */
+#endif
         
         /* XXX:
          * return true;
@@ -192,7 +202,7 @@ struct ADPass : public LoopPass
         } else if (isa<ConstantFP>(V)) {
             return cast<ConstantFP>(V)->getValueAPF().convertToDouble();
         } else {
-            throw 0;
+            return std::numeric_limits<double>::signaling_NaN();
         }
     }
 };
