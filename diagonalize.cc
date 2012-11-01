@@ -28,7 +28,7 @@ struct ADPass : public LoopPass
     Loop* loop;
     std::vector<BasicBlock*> blocks;
 
-    /* Keep track of the loop iterator and state variables. */
+    /* Keep track of the loop iterator. */
     int iter_base;
     Value* iter_final;
     PHINode* iter_var;
@@ -50,14 +50,7 @@ struct ADPass : public LoopPass
             && IPred == CmpInst::Predicate::ICMP_EQ)
         {
             if (isa<Instruction>(cmpRhs)) {
-                Instruction* irhs = cast<Instruction>(cmpRhs);
-
-                errs() << *irhs->getParent() << "\n";
-
-                /* loop->contains(irhs) causes bizarre segfaults */
-                if (!(std::find(blocks.begin(), blocks.end(),
-                    irhs->getParent()) == blocks.end()))
-                {
+                if (loop->contains(cast<Instruction>(cmpRhs))) {
                     return false;
                 }
             }
@@ -70,16 +63,14 @@ struct ADPass : public LoopPass
                 {
                     iter_var = cast<PHINode>(incrLhs);
                     iter_final = cmpRhs;
-                    errs() << "all good! in extract\n";
                     return true;
                 }
             }
         }
-        errs() << "oh shit\n";
         return false;
     }
 
-    virtual bool runOnLoop(Loop* loop, LPPassManager&) {
+    virtual bool runOnLoop(Loop* L, LPPassManager&) {
         if (loop->getSubLoops().size()) {
             return false;
         }
@@ -88,13 +79,8 @@ struct ADPass : public LoopPass
             return false;
         }
 
+        loop = L;
         blocks = loop->getBlocks();
-
-        errs() << "***** Loop contents *****\n";
-        for (size_t i=0; i < blocks.size(); ++i) {
-            errs() << *blocks[i] << "\n";
-        }
-        errs() << "***** Loop contents *****\n";
 
         /* Filter away loops with invalid instructions. */
         int nr_cmps = 0;
