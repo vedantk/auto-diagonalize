@@ -26,6 +26,7 @@ namespace
 struct ADPass : public LoopPass
 {
     Loop* loop;
+    DominatorTree* DT;
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop iterator. */
@@ -37,7 +38,9 @@ struct ADPass : public LoopPass
 
     ADPass() : LoopPass(ID) {}
 
-    virtual void getAnalysisUsage(AnalysisUsage&) const {}
+    virtual void getAnalysisUsage(AnalysisUsage& AU) const {
+        AU.addRequired<DominatorTree>();
+    }
 
     bool extractIterator(ICmpInst* icmp) {
         /* In canonical form, LLVM should pass us an ICmp with the predicate
@@ -50,7 +53,8 @@ struct ADPass : public LoopPass
             && IPred == CmpInst::Predicate::ICMP_EQ)
         {
             if (isa<Instruction>(cmpRhs)) {
-                if (loop->contains(cast<Instruction>(cmpRhs))) {
+                Instruction* irhs = cast<Instruction>(cmpRhs);
+                if (!DT->properlyDominates(irhs->getParent(), blocks.front())) {
                     return false;
                 }
             }
@@ -71,18 +75,18 @@ struct ADPass : public LoopPass
     }
 
     virtual bool runOnLoop(Loop* L, LPPassManager&) {
+        if (L->getSubLoops().size()) {
+            return false;
+        }
+
+        if (!L->getUniqueExitBlock()) {
+            return false;
+        }
+
         loop = L;
-        
-        if (loop->getSubLoops().size()) {
-            return false;
-        }
-
-        if (!loop->getUniqueExitBlock()) {
-            return false;
-        }
-
         blocks = loop->getBlocks();
-
+        DT = &getAnalysis<DominatorTree>();
+        
         /* Filter away loops with invalid instructions. */
         int nr_cmps = 0;
         ICmpInst* icmp = NULL;
@@ -99,11 +103,14 @@ struct ADPass : public LoopPass
                     }
                 } else if (isa<PHINode>(instr)) {
                     PHINode* PN = cast<PHINode>(instr);
-                    /* XXX:
-                     * Ensure that the LHS incoming value comes from outside
-                     * of the loop, and that it's a Constant.
-                     */
-                    if (PN->getNumIncomingValues() != 2) {
+                    if (PN->getNumIncomingValues() != 2
+                        || !DT->properlyDominates(PN->getIncomingBlock(0),
+                                                  blocks.front()))
+                    {
+                        return false;
+                    }
+                    Value* inLhs = PN->getIncomingValue(0);
+                    if (!isa<Constant>(inLhs)) {
                         return false;
                     } else {
                         phis.insert(PN);
@@ -118,10 +125,6 @@ struct ADPass : public LoopPass
                 } else if (!(isa<BranchInst>(instr)
                             || isa<IndirectBrInst>(instr)))
                 {
-                    /* XXX:
-                     * Be more stringent about the branches we allow, the
-                     * BasicBlock chain has to be simple.
-                     */
                     return false;
                 }
             }
