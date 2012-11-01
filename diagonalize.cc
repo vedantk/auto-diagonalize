@@ -31,10 +31,16 @@ struct ADPass : public LoopPass
     Loop* loop;
     DominatorTree* DT;
     std::vector<BasicBlock*> blocks;
+
+    /* Keep track of the loop range. */
     int64_t iter_base;
     Value* iter_final;
     PHINode* iter_var;
+
+    /* Store tags for state variables. */
     ValueMap<PHINode*, int> phis;
+
+    /* Track linear dependencies between state variables. */
     MatrixXcd TransformationMatrix;
 
     static char ID;
@@ -110,7 +116,11 @@ struct ADPass : public LoopPass
 
         int phi_index = 0;
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-            errs() << "PHINode: " << *kv->first << "\n\t Label: " << phi_index << "\n";
+            /* XXX:
+             * Remove sanity printf.
+             */
+            errs() << "PHINode: " << *kv->first
+                   << "\n\t Label: " << phi_index << "\n";
             phis[kv->first] = phi_index++;
         }
         
@@ -146,9 +156,6 @@ struct ADPass : public LoopPass
          */
 #endif
         
-        /* XXX:
-         * return true;
-         */
         return false;
     }
 
