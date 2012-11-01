@@ -16,18 +16,19 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
-#include <cmath>
-#include <limits>
-
 using namespace llvm;
 using namespace PatternMatch;
 using namespace Eigen;
+
+#define OP_IN_RANGE(_op, _start, _end) \
+    (_op >= Instruction::_start && _op <= Instruction::_end)
 
 namespace
 {
 
 struct ADPass : public LoopPass
 {
+private:
     Loop* loop;
     DominatorTree* DT;
     std::vector<BasicBlock*> blocks;
@@ -39,10 +40,9 @@ struct ADPass : public LoopPass
 
     /* Store tags for state variables. */
     ValueMap<PHINode*, int> phis;
+    typedef ValueMap<PHINode*, double> Coefficients;
 
-    /* Track linear dependencies between state variables. */
-    MatrixXcd TransformationMatrix;
-
+public:
     static char ID;
 
     ADPass() : LoopPass(ID) {}
@@ -87,16 +87,14 @@ struct ADPass : public LoopPass
                         return false;
                     }
                     Value* inLhs = PN->getIncomingValue(0);
-                    if (!isa<Constant>(inLhs)) {
+                    if (!(isa<ConstantInt>(inLhs) || isa<ConstantFP>(inLhs))) {
                         return false;
                     } else {
-                        phis[PN] = -1;
+                        phis[PN] = 0;
                     }
                 } else if (isa<BinaryOperator>(instr)) {
                     BinaryOperator* binop = cast<BinaryOperator>(instr);
-                    if (!(binop->getOpcode() >= Instruction::Add
-                        && binop->getOpcode() <= Instruction::FDiv))
-                    {
+                    if (!(OP_IN_RANGE(binop->getOpcode(), Add, FDiv))) {
                         return false;
                     }
                 } else if (!(isa<BranchInst>(instr)
@@ -116,29 +114,27 @@ struct ADPass : public LoopPass
 
         int phi_index = 0;
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-            /* XXX:
-             * Remove sanity printf.
-             */
             errs() << "PHINode: " << *kv->first
                    << "\n\t Label: " << phi_index << "\n";
             phis[kv->first] = phi_index++;
         }
         
         /* Find the initial state and all linear dependence relations. */
-        int count = 0;
-        MatrixXd InitialState = MatrixXd(phis.size(), 1);
-        TransformationMatrix = MatrixXcd(phis.size(), phis.size());
+        MatrixXd InitialState(phis.size(), 1);
+        MatrixXcd TransformationMatrix(phis.size(), phis.size());
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
             PHINode* PN = kv->first;
-            double n = DoubleFromValue(PN->getIncomingValue(0));
-            if (std::isnan(n)) {
+            int phi_label = phis[PN];
+            InitialState(phi_label, 0) = DoubleFromValue(PN->getIncomingValue(0));
+
+            Coefficients coeffs;
+            if (!trackUpdates(phi_label, PN->getIncomingValue(1), coeffs)) {
                 return false;
             }
-            InitialState(count, 0) = n;
-            if (!trackUpdates(count, PN)) {
-                return false;
+            for (auto ckv = coeffs.begin(); ckv != coeffs.end(); ++ckv) {
+                int target_phi = phis[kv->first];
+                TransformationMatrix(phi_label, target_phi) = kv->second;
             }
-            ++count;
         }
 
 #if 0
@@ -159,6 +155,7 @@ struct ADPass : public LoopPass
         return false;
     }
 
+private:
     bool extractIterator(ICmpInst* icmp) {
         /* In canonical form, LLVM should pass us an ICmp with the predicate
          * reduced to an equality comparison. The LHS should contain the loop
@@ -195,8 +192,59 @@ struct ADPass : public LoopPass
         return false;
     }
 
-    bool trackUpdates(int count, PHINode* PN) {
-        return false;
+    bool trackUpdates(Value* parent, Coefficients& coeffs) {
+        if (isa<PHINode>(parent)) {
+            /* Isolated PHINodes contribute one copy of themselves. */
+            PHINode* PN = cast<PHINode>(parent);
+            coeffs[PN] = 1;
+        } else if (isa<BinaryOperator>(parent)) {
+            BinaryOperator* binop = cast<BinaryOperator>(parent);
+            int opcode = binop->getOpcode();
+            Value *LHS = binop->getOperand(0), *RHS = binop->getOperand(1);
+            Coefficients lhsCoeffs, rhsCoeffs;
+            double scalar;
+
+            if (!(trackUpdates(LHS, lhsCoeffs) && trackUpdates(RHS, rhsCoeffs))) {
+                return false;
+            }
+
+            if (OP_IN_RANGE(opcode, Add, Fsub)) {
+                /* Add instructions shouldn't operate on scalars. */
+                if (scalarExpr(lhsCoeffs) || scalarExpr(rhsCoeffs)) {
+                    return false;
+                }
+            } else {
+                /* Multiply instructions must have (only) one scalar operand. */
+                if (scalarExpr(lhsCoeffs) ^ scalarExpr(rhsCoeffs)) {
+                    return false;
+                }
+
+                /* Divide instructions cannot have scalar numerators. */
+                if (OP_IN_RANGE(opcode, Udiv, FDiv) && !scalarExpr(LHS)) {
+                    return false;
+                }
+
+                scalar = DoubleFromValue(scalarExpr(lhsCoeffs) ? LHS : RHS);
+            }
+
+            for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
+                PHINode* PN = kv->first;
+                double lcoeff = lhsCoeffs.lookup(PN), rcoeff = rhsCoeffs.lookup(PN);
+                if (lcoeff == 0 && rcoeff == 0) {
+                    continue;
+                }
+                if (OP_IN_RANGE(opcode, Add, FAdd)) {
+                    coeffs[PN] = lcoeff + rcoeff;
+                } else if (OP_IN_RANGE(opcode, Sub, FSub)) {
+                    coeffs[PN] = lcoeff - rcoeff;
+                } else if (OP_IN_RANGE(opcode, Mul, FMul)) {
+                    coeffs[PN] = scalar * (lcoeff + rcoeff);
+                } else {
+                    coeffs[PN] = (1 / scalar) * (lcoeff + rcoeff);
+                }
+            }
+        } else return false;
+        return true;
     }
 
     int64_t IntFromValue(Value* V) {
@@ -208,9 +256,11 @@ struct ADPass : public LoopPass
             return double(IntFromValue(V));
         } else if (isa<ConstantFP>(V)) {
             return cast<ConstantFP>(V)->getValueAPF().convertToDouble();
-        } else {
-            return std::numeric_limits<double>::signaling_NaN();
         }
+    }
+
+    bool scalarExpr(Coefficients& coeffs) {
+        return coeffs.size() == 0;
     }
 };
 
