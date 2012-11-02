@@ -37,11 +37,11 @@ private:
     Value* iter_final;
     PHINode* iter_var;
 
-    /* Store tags for state variables. */
+    /* Index and store state variables. */
     ValueMap<PHINode*, int> phis;
-    typedef ValueMap<PHINode*, double> Coefficients;
 
-    const double epsilon = 100 * std::numeric_limits<double>::epsilon();
+    /* Track linear combinations of variables. */
+    typedef ValueMap<PHINode*, double> Coefficients;
 
 public:
     static char ID;
@@ -126,7 +126,7 @@ public:
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
             PHINode* PN = kv->first;
             int phi_label = phis[PN];
-            InitialState(phi_label, 0) = DoubleFromValue(PN->getIncomingValue(0));
+            InitialState(phi_label, 0) = ToDouble(PN->getIncomingValue(0));
 
             Coefficients coeffs;
             if (!trackUpdates(PN->getIncomingValue(1), coeffs)) {
@@ -150,12 +150,6 @@ public:
         std::cout << "System valid;\n";
         std::cout << TransformationMatrix << std::endl;
 
-
-        /* XXX:
-         * Perform P * (D^[iter_final]) * Pinv * InitialState, and assign the final
-         * values back into the state variables.
-         */
-        
         return false;
     }
 
@@ -163,7 +157,7 @@ private:
     bool extractIterator(ICmpInst* icmp) {
         /* In canonical form, LLVM should pass us an ICmp with the predicate
          * reduced to an equality comparison. The LHS should contain the loop
-         * increment, and the RHS should be an out-of-loop 'constant'. */
+         * increment, and the RHS should be an out-of-loop value. */
         Value *cmpLhs, *cmpRhs;
         ICmpInst::Predicate IPred; 
         if (match(icmp, m_ICmp(IPred, m_Value(cmpLhs),
@@ -171,8 +165,8 @@ private:
             && IPred == CmpInst::Predicate::ICMP_EQ)
         {
             if (isa<Instruction>(cmpRhs)) {
-                Instruction* irhs = cast<Instruction>(cmpRhs);
-                if (!DT->properlyDominates(irhs->getParent(), blocks.front())) {
+                BasicBlock* BB = cast<Instruction>(cmpRhs)->getParent();
+                if (!DT->properlyDominates(BB, blocks.front())) {
                     return false;
                 }
             }
@@ -187,7 +181,7 @@ private:
                     iter_var = cast<PHINode>(incrLhs);
                     Value* iter_initial = iter_var->getIncomingValue(0);
                     if (isa<ConstantInt>(iter_initial)) {
-                        iter_base = IntFromValue(iter_initial);
+                        iter_base = ToInt(iter_initial);
                         return true;
                     }
                 }
@@ -197,9 +191,11 @@ private:
     }
 
     bool trackUpdates(Value* parent, Coefficients& coeffs) {
+        /* Determine the linear combination that produces 'parent'. */
         if (isa<Constant>(parent)) {
             return true;
         } else if (isa<PHINode>(parent)) {
+            /* A PHINode should contribute a single copy of itself. */
             PHINode* PN = cast<PHINode>(parent);
             if (!phis.count(PN)) {
                 return false;
@@ -210,37 +206,41 @@ private:
             BinaryOperator* binop = cast<BinaryOperator>(parent);
             int opcode = binop->getOpcode();
             Value *LHS = binop->getOperand(0), *RHS = binop->getOperand(1);
-            Coefficients lhsCoeffs, rhsCoeffs;
-            double scalar;
 
-            if (!(trackUpdates(LHS, lhsCoeffs) && trackUpdates(RHS, rhsCoeffs))) {
+            Coefficients lhsCoeffs, rhsCoeffs;
+            if (!trackUpdates(LHS, lhsCoeffs)
+                || !trackUpdates(RHS, rhsCoeffs))
+            {
                 return false;
             }
 
+            double scalar;
             if (OP_IN_RANGE(opcode, Add, FSub)) {
                 /* Add instructions shouldn't operate on scalars. */
-                if (scalarExpr(lhsCoeffs) || scalarExpr(rhsCoeffs)) {
+                if (scalarp(lhsCoeffs) || scalarp(rhsCoeffs)) {
                     return false;
                 }
             } else {
-                /* Multiply instructions must have (only) one scalar operand. */
-                if (scalarExpr(lhsCoeffs) ^ scalarExpr(rhsCoeffs)) {
+                /* Mul instructions can only have one scalar operand. */
+                if (scalarp(lhsCoeffs) ^ scalarp(rhsCoeffs)) {
                     return false;
                 }
 
-                /* Divide instructions cannot have scalar numerators. */
-                if (OP_IN_RANGE(opcode, UDiv, FDiv) && !scalarExpr(lhsCoeffs)) {
+                /* Div instructions can not have scalar numerators. */
+                if (OP_IN_RANGE(opcode, UDiv, FDiv) && !scalarp(lhsCoeffs)) {
                     return false;
                 }
 
-                scalar = DoubleFromValue(scalarExpr(lhsCoeffs) ? LHS : RHS);
+                scalar = ToDouble(scalarp(lhsCoeffs) ? LHS : RHS);
             }
 
+            /* Merge the two sets of coefficients. */
             for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
                 PHINode* PN = kv->first;
-                double lcoeff = lhsCoeffs.lookup(PN), rcoeff = rhsCoeffs.lookup(PN);
+                double lcoeff = lhsCoeffs.lookup(PN);
+                double rcoeff = rhsCoeffs.lookup(PN);
                 
-                /* Adding trivial entries to the coefficient table breaks scalarExpr(). */
+                /* Adding nil entries to 'coeffs' breaks scalarp(X). */
                 if (lcoeff == 0.0 && rcoeff == 0.0) {
                     continue;
                 }
@@ -259,41 +259,43 @@ private:
         return true;
     }
 
-    int64_t IntFromValue(Value* V) {
+    int64_t ToInt(Value* V) {
         return cast<ConstantInt>(V)->getValue().getSExtValue();
     }
 
-    double DoubleFromValue(Value* V) {
+    double ToDouble(Value* V) {
         if (isa<ConstantInt>(V)) {
-            return double(IntFromValue(V));
+            return double(ToInt(V));
         } else if (isa<ConstantFP>(V)) {
             return cast<ConstantFP>(V)->getValueAPF().convertToDouble();
         }
         return 0.0;
     }
 
-    bool scalarExpr(Coefficients& coeffs) {
+    bool scalarp(Coefficients& coeffs) {
         return coeffs.size() == 0;
     }
 
     bool checkSystem(MatrixXd& A, MatrixXd& x,
                      MatrixXcd& P, MatrixXcd& D, MatrixXcd& Pinv)
     {
-        /* Ensure that there are no complex eigenvectors, and check if the
-         * diagonalization is reasonably accurate. */
+        /* Ensure that there are no complex eigenvectors. */
         for (int i=0; i < P.rows(); ++i) {
             for (int j=0; j < P.cols(); ++j) {
                 if (std::imag(P(i, j)) != 0.0) {
-                    std::cout << "[fata] P(i, j) = " << P(i, j) << "\n";
                     return false;
                 }
             }
         }
+
+        /* Check that the diagonalization is reasonably accurate. */
         MatrixXd A3x = A*A*A*x;
         MatrixXcd PD3Px = (P*(D*D*D)*Pinv)*x;
+        const double epsilon = 100 * std::numeric_limits<double>::epsilon();
         for (int i=0; i < x.rows(); ++i) {
-            if (std::abs(std::abs(PD3Px(i, 0)) - std::abs(A3x(i, 0))) > epsilon) {
-                std::cout << "[fatal] Cubed error: " << PD3Px(i, 0) << " : " << A3x(i, 0) << "\n";
+            if (epsilon <
+                std::abs(std::abs(PD3Px(i, 0)) - std::abs(A3x(i, 0))))
+            {
                 return false;
             }
         }
