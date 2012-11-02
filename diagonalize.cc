@@ -53,11 +53,9 @@ public:
     }
 
     virtual bool runOnLoop(Loop* L, LPPassManager&) {
-        if (L->getSubLoops().size()) {
-            return false;
-        }
-
-        if (!L->getUniqueExitBlock()) {
+        if (!L->isLCSSAForm()
+            || L->getSubLoops().size() || !L->getUniqueExitBlock())
+        {
             return false;
         }
 
@@ -149,6 +147,22 @@ public:
 
         std::cout << "System valid;\n";
         std::cout << TransformationMatrix << std::endl;
+
+        /*
+         * XXX:
+         * - Do some analysis on the loop;
+         *   1) What is the block we jump out to when we finish the loop?
+         *      BBTarget
+         *   2) Which PHI nodes in this block have incoming values from
+         *      our loop? Store these PHI nodes: determine the state variable
+         *      they refer to by examining the Value* they have incoming, and
+         *      searching for that Value* in our set of PHIs.
+         *      Map[OuterPHI] => StateVariable
+         *   3) Delete all of the Instructions in our loop.
+         *   4) Inject matrix multiplication code into the hollowed BB.
+         *   5) Change the incoming values in the OuterPHIs to the final
+         *      results produced by the diagonalization process.
+         */
 
         return false;
     }
