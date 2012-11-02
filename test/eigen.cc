@@ -12,6 +12,11 @@ using namespace Eigen;
 int main() {
 	int fib = 42;
 
+    MatrixXd m(2, 2);
+    m << 0, 0, 0, 0;
+    EigenSolver<MatrixXd> mSolver(m);
+    cout << mSolver.eigenvectors() << "\n";
+
 	MatrixXcd T;
 
 	T = MatrixXcd(3, 3);

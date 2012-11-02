@@ -9,11 +9,8 @@
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/ADT/ValueMap.h"
 #include "llvm/Support/PatternMatch.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include <Eigen/Core>
-#include <Eigen/LU>
-#include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
 #include <iostream>
@@ -43,6 +40,8 @@ private:
     /* Store tags for state variables. */
     ValueMap<PHINode*, int> phis;
     typedef ValueMap<PHINode*, double> Coefficients;
+
+    const double epsilon = 100 * std::numeric_limits<double>::epsilon();
 
 public:
     static char ID;
@@ -139,23 +138,23 @@ public:
             }
         }
 
-        // XXX
-        std::cout << TransformationMatrix << "\n";
+        /* Diagonalize the transformation matrix. */
+        EigenSolver<MatrixXd> EigSolver(TransformationMatrix);
+        MatrixXcd P = EigSolver.eigenvectors();
+        MatrixXcd D = EigSolver.eigenvalues().asDiagonal();
+        MatrixXcd Pinv = P.inverse();
+        if (!checkSystem(TransformationMatrix, InitialState, P, D, Pinv)) {
+            return false; 
+        }
 
-#if 0
-        /* XXX:
-         * How do we check if complex eigenvalues were generated? Avoid this case...
-         */
-        EigenSolver<MatrixXd> EigGen(TransformationMatrix);
-        MatrixXd P = EigGen.eigenvectors();
-        MatrixXd D = EigGen.eigenvalues().asDiagonal();
-        MatrixXd Pinv = P.inverse();
+        std::cout << "System valid;\n";
+        std::cout << TransformationMatrix << std::endl;
+
 
         /* XXX:
          * Perform P * (D^[iter_final]) * Pinv * InitialState, and assign the final
          * values back into the state variables.
          */
-#endif
         
         return false;
     }
@@ -242,7 +241,7 @@ private:
                 double lcoeff = lhsCoeffs.lookup(PN), rcoeff = rhsCoeffs.lookup(PN);
                 
                 /* Adding trivial entries to the coefficient table breaks scalarExpr(). */
-                if (lcoeff == 0 && rcoeff == 0) {
+                if (lcoeff == 0.0 && rcoeff == 0.0) {
                     continue;
                 }
 
@@ -270,11 +269,35 @@ private:
         } else if (isa<ConstantFP>(V)) {
             return cast<ConstantFP>(V)->getValueAPF().convertToDouble();
         }
-        return 0;
+        return 0.0;
     }
 
     bool scalarExpr(Coefficients& coeffs) {
         return coeffs.size() == 0;
+    }
+
+    bool checkSystem(MatrixXd& A, MatrixXd& x,
+                     MatrixXcd& P, MatrixXcd& D, MatrixXcd& Pinv)
+    {
+        /* Ensure that there are no complex eigenvectors, and check if the
+         * diagonalization is reasonably accurate. */
+        for (int i=0; i < P.rows(); ++i) {
+            for (int j=0; j < P.cols(); ++j) {
+                if (std::imag(P(i, j)) != 0.0) {
+                    std::cout << "[fata] P(i, j) = " << P(i, j) << "\n";
+                    return false;
+                }
+            }
+        }
+        MatrixXd A3x = A*A*A*x;
+        MatrixXcd PD3Px = (P*(D*D*D)*Pinv)*x;
+        for (int i=0; i < x.rows(); ++i) {
+            if (std::abs(std::abs(PD3Px(i, 0)) - std::abs(A3x(i, 0))) > epsilon) {
+                std::cout << "[fatal] Cubed error: " << PD3Px(i, 0) << " : " << A3x(i, 0) << "\n";
+                return false;
+            }
+        }
+        return true;
     }
 };
 
