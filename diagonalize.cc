@@ -16,12 +16,14 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include <iostream>
+
 using namespace llvm;
 using namespace PatternMatch;
 using namespace Eigen;
 
 #define OP_IN_RANGE(_op, _start, _end) \
-    (_op >= Instruction::_start && _op <= Instruction::_end)
+    (_op >= Instruction:: _start && _op <= Instruction:: _end)
 
 namespace
 {
@@ -114,37 +116,40 @@ public:
 
         int phi_index = 0;
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-            errs() << "PHINode: " << *kv->first
-                   << "\n\t Label: " << phi_index << "\n";
             phis[kv->first] = phi_index++;
         }
         
         /* Find the initial state and all linear dependence relations. */
-        MatrixXd InitialState(phis.size(), 1);
-        MatrixXcd TransformationMatrix(phis.size(), phis.size());
+        size_t nr_phis = phis.size();
+        MatrixXd InitialState(nr_phis, 1);
+        MatrixXd TransformationMatrix(nr_phis, nr_phis);
+        TransformationMatrix << MatrixXd::Zero(nr_phis, nr_phis);
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
             PHINode* PN = kv->first;
             int phi_label = phis[PN];
             InitialState(phi_label, 0) = DoubleFromValue(PN->getIncomingValue(0));
 
             Coefficients coeffs;
-            if (!trackUpdates(phi_label, PN->getIncomingValue(1), coeffs)) {
+            if (!trackUpdates(PN->getIncomingValue(1), coeffs)) {
                 return false;
             }
             for (auto ckv = coeffs.begin(); ckv != coeffs.end(); ++ckv) {
-                int target_phi = phis[kv->first];
-                TransformationMatrix(phi_label, target_phi) = kv->second;
+                int target_phi = phis[ckv->first];
+                TransformationMatrix(phi_label, target_phi) = ckv->second;
             }
         }
+
+        // XXX
+        std::cout << TransformationMatrix << "\n";
 
 #if 0
         /* XXX:
          * How do we check if complex eigenvalues were generated? Avoid this case...
          */
         EigenSolver<MatrixXd> EigGen(TransformationMatrix);
-        MatrixXcd P = EigGen.eigenvectors();
-        MatrixXcd D = EigGen.eigenvalues().asDiagonal();
-        MatrixXcd Pinv = P.inverse();
+        MatrixXd P = EigGen.eigenvectors();
+        MatrixXd D = EigGen.eigenvalues().asDiagonal();
+        MatrixXd Pinv = P.inverse();
 
         /* XXX:
          * Perform P * (D^[iter_final]) * Pinv * InitialState, and assign the final
@@ -193,10 +198,15 @@ private:
     }
 
     bool trackUpdates(Value* parent, Coefficients& coeffs) {
-        if (isa<PHINode>(parent)) {
-            /* Isolated PHINodes contribute one copy of themselves. */
+        if (isa<Constant>(parent)) {
+            return true;
+        } else if (isa<PHINode>(parent)) {
             PHINode* PN = cast<PHINode>(parent);
-            coeffs[PN] = 1;
+            if (!phis.count(PN)) {
+                return false;
+            } else {
+                coeffs[PN] = 1;
+            }
         } else if (isa<BinaryOperator>(parent)) {
             BinaryOperator* binop = cast<BinaryOperator>(parent);
             int opcode = binop->getOpcode();
@@ -208,7 +218,7 @@ private:
                 return false;
             }
 
-            if (OP_IN_RANGE(opcode, Add, Fsub)) {
+            if (OP_IN_RANGE(opcode, Add, FSub)) {
                 /* Add instructions shouldn't operate on scalars. */
                 if (scalarExpr(lhsCoeffs) || scalarExpr(rhsCoeffs)) {
                     return false;
@@ -220,7 +230,7 @@ private:
                 }
 
                 /* Divide instructions cannot have scalar numerators. */
-                if (OP_IN_RANGE(opcode, Udiv, FDiv) && !scalarExpr(LHS)) {
+                if (OP_IN_RANGE(opcode, UDiv, FDiv) && !scalarExpr(lhsCoeffs)) {
                     return false;
                 }
 
@@ -230,9 +240,12 @@ private:
             for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
                 PHINode* PN = kv->first;
                 double lcoeff = lhsCoeffs.lookup(PN), rcoeff = rhsCoeffs.lookup(PN);
+                
+                /* Adding trivial entries to the coefficient table breaks scalarExpr(). */
                 if (lcoeff == 0 && rcoeff == 0) {
                     continue;
                 }
+
                 if (OP_IN_RANGE(opcode, Add, FAdd)) {
                     coeffs[PN] = lcoeff + rcoeff;
                 } else if (OP_IN_RANGE(opcode, Sub, FSub)) {
@@ -257,6 +270,7 @@ private:
         } else if (isa<ConstantFP>(V)) {
             return cast<ConstantFP>(V)->getValueAPF().convertToDouble();
         }
+        return 0;
     }
 
     bool scalarExpr(Coefficients& coeffs) {
