@@ -176,12 +176,16 @@ public:
         Value** PDPinv = new Value*[nr_phis * nr_phis];
         for (int i = 0; i < nr_phis; ++i) {
             for (int j = 0; j < nr_phis; ++j) {
+                Value* inprod = ToConstantFP(ctx, 0.0);
                 for (int k = 0; k < nr_phis; ++k) {
                     int idx = i * nr_phis + k;
-                    PDPinv[idx] = BinaryOperator::Create(Instruction::FMul,
+                    Value* ik_kj = BinaryOperator::Create(Instruction::FMul,
                         PDn[i * nr_phis + k], ToConstantFP(ctx, Pinv(k, j)),
-                        "pdpinv", dgen);
+                        "ik_kj", dgen);
+                    inprod = BinaryOperator::Create(Instruction::FAdd,
+                        ik_kj, inprod, "inprod", dgen);
                 }
+                PDPinv[i * nr_phis + j] = inprod;
             }
         }
 
