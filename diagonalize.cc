@@ -98,9 +98,7 @@ public:
                     if (!(OP_IN_RANGE(binop->getOpcode(), Add, FDiv))) {
                         return false;
                     }
-                } else if (!(isa<BranchInst>(instr)
-                            || isa<IndirectBrInst>(instr)))
-                {
+                } else if (!isa<BranchInst>(instr)) {
                     return false;
                 }
             }
@@ -149,8 +147,10 @@ public:
 
         /* Emit instructions to compute the closed form in a new block. */
         LLVMContext& ctx = blocks.front()->getContext();
-        Module* mod = exit_block->getParent()->getParent();
-        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", 0);
+        Function* parentFunc = exit_block->getParent();
+        Module* mod = parentFunc->getParent();
+        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", parentFunc,
+            exit_block);
         Type* numTy = Type::getDoubleTy(ctx);
         std::vector<Type*> powProto(2, numTy);
         FunctionType* powType = FunctionType::get(numTy, powProto, false);
@@ -205,38 +205,49 @@ public:
 
         delete[] PDn;
 
+        errs() << *loop->getLoopPreheader() << "\n";
+        errs() << *exit_block << "\n";
         errs() << *dgen << "\n";
 
-        /*
-         * XXX:
-         * 1) Replace incoming values to PHI nodes in the exit block with
-         *    the correct results from dgen.
-         * 2) Point outgoing edges from the loop preheader to dgen.
-         * 3) Call eraseFromParent() on every BasicBlock in the loop.
-         */
-
-        /* Find dependencies on state variables outside of the loop. */
+        /* Replace dependencies on state variables outside of the loop. */
         for (auto II = exit_block->begin(); II != exit_block->end(); ++II) {
             Instruction* instr = II;
             if (isa<PHINode>(instr)) {
-                PHINode* PN = cast<PHINode>(instr);
-                if (PN->getBasicBlockIndex(blocks.back()) != -1) {
-                    Value* V = PN->getIncomingValueForBlock(blocks.back());
+                PHINode* exitPhi = cast<PHINode>(instr);
+                int incomingEdge = exitPhi->getBasicBlockIndex(blocks.back());
+                if (incomingEdge != -1) {
+                    Value* exitV = exitPhi->getIncomingValue(incomingEdge);
                     for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-                        if (kv->first->getIncomingValue(1) == V) {
-                            /* We've found the PHI from our loop which
-                             * feeds into the exit block. */
-                            
-                            /* XXX */
+                        PHINode* loopPhi = kv->first;
+                        if (loopPhi->getIncomingValue(1) != exitV) {
+                            continue;
                         }
+                        size_t phiIdx = phis[loopPhi];
+                        exitPhi->setIncomingValue(incomingEdge, soln[phiIdx]);
                     }
                 }
             }
         }
 
+        /* Point outgoing edges from the loop preheader to dgen. */
+        BranchInst::Create(exit_block, dgen);
+        TerminatorInst* TI = loop->getLoopPreheader()->getTerminator();
+        BranchInst* br = dyn_cast<BranchInst>(TI);
+        br->setSuccessor(0, dgen);
+
+        errs() << *loop->getLoopPreheader() << "\n";
+        errs() << *exit_block << "\n";
+        errs() << *dgen << "\n";
+
+        /* Call eraseFromParent() on every BasicBlock in the loop. */
+        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
+            BasicBlock* BB = *it;
+            BB->eraseFromParent();
+        }
+
         delete[] soln;
 
-        return false;
+        return true;
     }
 
 private:
