@@ -32,6 +32,7 @@ private:
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop range. */
+    ICmpInst* icmp; 
     Value* iter_final;
     PHINode* iter_var;
 
@@ -58,51 +59,14 @@ public:
 
         if (!loop->isLCSSAForm(*DT)
             || loop->getSubLoops().size()
-            || !(exit_block = loop->getUniqueExitBlock()))
+            || !(exit_block = loop->getUniqueExitBlock())
+            || !loopFilter())
         {
             return false;
         }
 
-        /* Filter away loops with unsupported instructions. */
-        size_t nr_cmps = 0;
-        ICmpInst* icmp = NULL;
-        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
-            BasicBlock* BB = *it;
-            for (auto II = BB->begin(); II != BB->end(); ++II) {
-                Instruction* instr = II;
-                if (isa<ICmpInst>(instr)) {
-                    if (++nr_cmps > 1) {
-                        return false;
-                    } else {
-                        icmp = cast<ICmpInst>(instr);
-                    }
-                } else if (isa<PHINode>(instr)) {
-                    PHINode* PN = cast<PHINode>(instr);
-                    if (PN->getNumIncomingValues() != 2
-                        || !DT->properlyDominates(PN->getIncomingBlock(0),
-                                                  blocks.front()))
-                    {
-                        return false;
-                    }
-                    Value* inLhs = PN->getIncomingValue(0);
-                    if (!(isa<ConstantInt>(inLhs) || isa<ConstantFP>(inLhs))) {
-                        return false;
-                    } else {
-                        phis[PN] = 0;
-                    }
-                } else if (isa<BinaryOperator>(instr)) {
-                    BinaryOperator* binop = cast<BinaryOperator>(instr);
-                    if (!(OP_IN_RANGE(binop->getOpcode(), Add, FDiv))) {
-                        return false;
-                    }
-                } else if (!isa<BranchInst>(instr)) {
-                    return false;
-                }
-            }
-        }
-
         /* Extract the loop iterator if possible. */
-        if (!icmp || !extractIterator(icmp)) {
+        if (!extractIterator(icmp)) {
             return false;
         } else {
             phis.erase(iter_var);
@@ -244,6 +208,47 @@ public:
     }
 
 private:
+    bool loopFilter() {
+        /* Filter away loops with unsupported instructions. */
+        icmp = NULL;
+        size_t nr_cmps = 0;
+        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
+            BasicBlock* BB = *it;
+            for (auto II = BB->begin(); II != BB->end(); ++II) {
+                Instruction* instr = II;
+                if (isa<ICmpInst>(instr)) {
+                    if (++nr_cmps > 1) {
+                        return false;
+                    } else {
+                        icmp = cast<ICmpInst>(instr);
+                    }
+                } else if (isa<PHINode>(instr)) {
+                    PHINode* PN = cast<PHINode>(instr);
+                    if (PN->getNumIncomingValues() != 2
+                        || !DT->properlyDominates(PN->getIncomingBlock(0),
+                                                  blocks.front()))
+                    {
+                        return false;
+                    }
+                    Value* inLhs = PN->getIncomingValue(0);
+                    if (!(isa<ConstantInt>(inLhs) || isa<ConstantFP>(inLhs))) {
+                        return false;
+                    } else {
+                        phis[PN] = 0;
+                    }
+                } else if (isa<BinaryOperator>(instr)) {
+                    BinaryOperator* binop = cast<BinaryOperator>(instr);
+                    if (!(OP_IN_RANGE(binop->getOpcode(), Add, FDiv))) {
+                        return false;
+                    }
+                } else if (!isa<BranchInst>(instr)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     bool extractIterator(ICmpInst* icmp) {
         /* In canonical form, we should get an icmp with the predicate
          * reduced to an equality test. */
