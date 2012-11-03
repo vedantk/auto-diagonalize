@@ -150,7 +150,7 @@ public:
         /* Emit instructions to compute the closed form in a new block. */
         LLVMContext& ctx = blocks.front()->getContext();
         Module* mod = exit_block->getParent()->getParent();
-        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", 0, exit_block);
+        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", 0);
         Type* numTy = Type::getDoubleTy(ctx);
         std::vector<Type*> powProto(2, numTy);
         FunctionType* powType = FunctionType::get(numTy, powProto, false);
@@ -175,9 +175,11 @@ public:
         }
 
         Value** soln = new Value*[nr_phis];
+        Value* zero = ToConstantFP(ctx, 0.0);
         for (size_t i = 0; i < nr_phis; ++i) {
+            soln[i] = zero;
             for (size_t j = 0; j < nr_phis; ++j) {
-                Value* inprod = ToConstantFP(ctx, 0.0);
+                Value* inprod = zero;
                 for (size_t k = 0; k < nr_phis; ++k) {
                     Value* ik_kj = BinaryOperator::Create(Instruction::FMul,
                         PDn[i * nr_phis + k],
@@ -187,23 +189,20 @@ public:
                         ik_kj, inprod, "inprod", dgen);
                 }
 
-                if (soln[i] == NULL) {
-                    soln[i] = inprod;
-                } else {
-                    Value* xj_prod = BinaryOperator::Create(Instruction::FMul,
-                        inprod, ToConstantFP(ctx, InitialState(j)), "pdpxj",
-                        dgen);
-                    soln[i] = BinaryOperator::Create(Instruction::FAdd, 
-                        xj_prod, soln[i], "xf", dgen);
-                }
+                Value* xj_prod = BinaryOperator::Create(Instruction::FMul,
+                    inprod, ToConstantFP(ctx, InitialState(j)), "pdpxj",
+                    dgen);
+                soln[i] = BinaryOperator::Create(Instruction::FAdd, 
+                    xj_prod, soln[i], "xf", dgen);
             }
         }
 
-        errs() << dgen << "\n";
+        errs() << *dgen << "\n";
 
         delete[] PDn;
         delete[] soln;
 
+#if 0
         /*
          * XXX:
          * - Do some analysis on the loop;
@@ -236,6 +235,7 @@ public:
                 }
             }
         }
+#endif
 
         return false;
     }
