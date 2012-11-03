@@ -1,16 +1,18 @@
 auto-diagonalize
 ================
 
-_auto-diagonalize_ is an optimization pass written for LLVM.
+auto-diagonalize is an optimization pass written for LLVM.
 
-Its purpose is to find loops that can be modeled as linear dynamical
-systems, and replace them with a closed-form representation of the system.
+Its purpose is to replace loops that can be modeled as linear dynamical
+systems with a closed-form representation of the system.
 
 The effect of this optimization is to to transform simple _O(n)_ processes
 into _O(lg(n))_ processes.
 
 This is only possible if the _n x n_ transformation matrix of the system
 has _n_ linearly independent eigenvectors.
+
+### The Fibonacci Example
 
 Take for example the iterative fibonacci algorithm;
 
@@ -64,7 +66,7 @@ dgen:                                             ; preds = %.lr.ph
 ```
 
 Through constant folding and auto-vectorization, LLVM may produce something
-even nicer. The inlined _main_ function looks like;
+even nicer. The inlined _main_ function looks like this;
 
 ```
 0000000000400650 <main>:
@@ -104,3 +106,19 @@ even nicer. The inlined _main_ function looks like;
   4006bd:	c3                   	retq   
   4006be:	66 90                	xchg   %ax,%ax
 ```
+
+### Limitations
+
+This optimization currently only works on loops that are in [LCSSA]
+(http://gcc.gnu.org/onlinedocs/gccint/LCSSA.html) form. It also only
+handles loops which update floating point variables, though it should be
+trivial to remove this restriction.
+
+This pass does not attempt to handle transformation matrices which have
+complex eigenvalues.
+
+### Acknowledgements
+
+This project makes heavy use of [Eigen]
+(http://eigen.tuxfamily.org/index.php?title=Main_Page) and [LLVM](llvm.org),
+which are both really fun to work with.
