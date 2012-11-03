@@ -158,14 +158,17 @@ public:
             GlobalValue::ExternalLinkage, "llvm.pow.f64", mod);
         powf->setCallingConv(CallingConv::C);
 
+        /* P(D^n) = r * λ^n : ∀(r) ∈ row(P) */
         Value** PDn = new Value*[nr_phis * nr_phis];
         for (size_t j = 0; j < nr_phis; ++j) {
+            /* λ[j]^n */
             Value* exptargs[] = {
                 ToConstantFP(ctx, std::real(D(j, j))), iter_final
             };
             Value* eigvexpt = CallInst::Create(powf,
                 ArrayRef<Value*>(exptargs, 2), "eigvexpt", dgen);
 
+            /* PDn[i][j] = P[i][j] * λ[j]^n */
             for (size_t i = 0; i < nr_phis; ++i) {
                 size_t index = i * nr_phis + j;
                 PDn[index] = BinaryOperator::Create(Instruction::FMul,
@@ -174,11 +177,13 @@ public:
             }
         }
 
+        /* xf = P(D^n) * Pinv * x0 */
         Value** soln = new Value*[nr_phis];
         Value* zero = ToConstantFP(ctx, 0.0);
         for (size_t i = 0; i < nr_phis; ++i) {
             soln[i] = zero;
             for (size_t j = 0; j < nr_phis; ++j) {
+                /* inprod = <a, b> : a ∈ row(P(D^n)), b ∈ col(Pinv) */
                 Value* inprod = zero;
                 for (size_t k = 0; k < nr_phis; ++k) {
                     Value* ik_kj = BinaryOperator::Create(Instruction::FMul,
@@ -189,6 +194,7 @@ public:
                         ik_kj, inprod, "inprod", dgen);
                 }
 
+                /* xf[i] = ∑ P(D^n)Pinv[i][j] * x0[j] */
                 Value* xj_prod = BinaryOperator::Create(Instruction::FMul,
                     inprod, ToConstantFP(ctx, InitialState(j)), "pdpxj",
                     dgen);
