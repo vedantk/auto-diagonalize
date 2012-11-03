@@ -183,50 +183,39 @@ public:
         for (size_t i = 0; i < nr_phis; ++i) {
             soln[i] = zero;
             for (size_t j = 0; j < nr_phis; ++j) {
-                /* inprod = <a, b> : a ∈ row(P(D^n)), b ∈ col(Pinv) */
-                Value* inprod = zero;
+                /* dotp = <a, b> : a ∈ row(P(D^n)), b ∈ col(Pinv) */
+                Value* dotp = zero;
                 for (size_t k = 0; k < nr_phis; ++k) {
                     Value* ik_kj = BinaryOperator::Create(Instruction::FMul,
                         PDn[i * nr_phis + k],
                         ToConstantFP(ctx, std::real(Pinv(k, j))),
                         "ik_kj", dgen);
-                    inprod = BinaryOperator::Create(Instruction::FAdd,
-                        ik_kj, inprod, "inprod", dgen);
+                    dotp = BinaryOperator::Create(Instruction::FAdd,
+                        ik_kj, dotp, "dotp", dgen);
                 }
 
                 /* xf[i] = ∑ P(D^n)Pinv[i][j] * x0[j] */
                 Value* xj_prod = BinaryOperator::Create(Instruction::FMul,
-                    inprod, ToConstantFP(ctx, InitialState(j)), "pdpxj",
+                    dotp, ToConstantFP(ctx, InitialState(j)), "pdpxj",
                     dgen);
                 soln[i] = BinaryOperator::Create(Instruction::FAdd, 
                     xj_prod, soln[i], "xf", dgen);
             }
         }
 
+        delete[] PDn;
+
         errs() << *dgen << "\n";
 
-        delete[] PDn;
-        delete[] soln;
-
-#if 0
         /*
          * XXX:
-         * - Do some analysis on the loop;
-         *   1) What is the block we jump out to when we finish the loop?
-         *      exit_block
-         *   2) Which PHI nodes in this block have incoming values from
-         *      our loop? Store these PHI nodes: determine the state variable
-         *      they refer to by examining the Value* they have incoming, and
-         *      searching for that Value* in our set of PHIs.
-         *      Map[OuterPHI] => StateVariable
-         *   3) Delete all of the Instructions in our loop.
-         *   4) Inject matrix multiplication code into the hollowed BB.
-         *   5) Change the incoming values in the OuterPHIs to the final
-         *      results produced by the diagonalization process.
+         * 1) Replace incoming values to PHI nodes in the exit block with
+         *    the correct results from dgen.
+         * 2) Point outgoing edges from the loop preheader to dgen.
+         * 3) Call eraseFromParent() on every BasicBlock in the loop.
          */
 
         /* Find dependencies on state variables outside of the loop. */
-        ValueMap<PHINode*, PHINode*> outerDeps;
         for (auto II = exit_block->begin(); II != exit_block->end(); ++II) {
             Instruction* instr = II;
             if (isa<PHINode>(instr)) {
@@ -235,13 +224,17 @@ public:
                     Value* V = PN->getIncomingValueForBlock(blocks.back());
                     for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
                         if (kv->first->getIncomingValue(1) == V) {
-                            outerDeps[PN] = kv->first;
+                            /* We've found the PHI from our loop which
+                             * feeds into the exit block. */
+                            
+                            /* XXX */
                         }
                     }
                 }
             }
         }
-#endif
+
+        delete[] soln;
 
         return false;
     }
