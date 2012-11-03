@@ -13,9 +13,6 @@
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 
-#include <iostream>
-#include "llvm/Support/raw_ostream.h"
-
 using namespace llvm;
 using namespace PatternMatch;
 using namespace Eigen;
