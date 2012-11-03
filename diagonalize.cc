@@ -174,10 +174,9 @@ public:
             if (isa<PHINode>(instr)) {
                 PHINode* PN = cast<PHINode>(instr);
                 if (PN->getBasicBlockIndex(blocks.back()) != -1) {
+                    Value* V = PN->getIncomingValueForBlock(blocks.back());
                     for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-                        if (kv->first->getIncomingValue(1) ==
-                            PN->getIncomingValueForBlock(blocks.back()))
-                        {
+                        if (kv->first->getIncomingValue(1) == V) {
                             outerDeps[PN] = kv->first;
                         }
                     }
@@ -189,12 +188,13 @@ public:
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
             for (auto II = (*it)->begin(); II != (*it)->end(); ++II) {
                 Instruction* instr = II;
-                // instr->removeFromParent();
-                errs() << "woo\n";
+                if (!isa<BranchInst>(instr)) {
+                    instr->removeFromParent();
+                }
             }
         }
 
-        errs() << *blocks.back() << "\n";
+        //errs() << *blocks.back() << "\n";
 
         return false;
     }
@@ -263,21 +263,21 @@ private:
             double scalar;
             if (OP_IN_RANGE(opcode, Add, FSub)) {
                 /* Add instructions shouldn't operate on scalars. */
-                if (scalarp(lhsCoeffs) || scalarp(rhsCoeffs)) {
+                if (isScalar(lhsCoeffs) || isScalar(rhsCoeffs)) {
                     return false;
                 }
             } else {
                 /* Mul instructions can only have one scalar operand. */
-                if (scalarp(lhsCoeffs) ^ scalarp(rhsCoeffs)) {
+                if (isScalar(lhsCoeffs) ^ isScalar(rhsCoeffs)) {
                     return false;
                 }
 
                 /* Div instructions can not have scalar numerators. */
-                if (OP_IN_RANGE(opcode, UDiv, FDiv) && !scalarp(lhsCoeffs)) {
+                if (OP_IN_RANGE(opcode, UDiv, FDiv) && !isScalar(lhsCoeffs)) {
                     return false;
                 }
 
-                scalar = ToDouble(scalarp(lhsCoeffs) ? LHS : RHS);
+                scalar = ToDouble(isScalar(lhsCoeffs) ? LHS : RHS);
             }
 
             /* Merge the two sets of coefficients. */
@@ -286,7 +286,7 @@ private:
                 double lcoeff = lhsCoeffs.lookup(PN);
                 double rcoeff = rhsCoeffs.lookup(PN);
 
-                /* Adding nil entries to 'coeffs' breaks scalarp(X). */
+                /* Adding nil entries to 'coeffs' breaks isScalar(X). */
                 if (lcoeff == 0.0 && rcoeff == 0.0) {
                     continue;
                 }
@@ -318,7 +318,7 @@ private:
         return 0.0;
     }
 
-    bool scalarp(Coefficients& coeffs) {
+    bool isScalar(Coefficients& coeffs) {
         return coeffs.size() == 0;
     }
 
