@@ -35,7 +35,6 @@ private:
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop range. */
-    int64_t iter_base;
     Value* iter_final;
     PHINode* iter_var;
 
@@ -148,8 +147,46 @@ public:
             return false;
         }
 
-        std::cout << "System valid;\n";
-        std::cout << TransformationMatrix << std::endl;
+        /* Emit instructions to compute the closed form in a new block. */
+        LLVMContext& ctx = blocks.front()->getContext();
+        Module* mod = exit_block->getParent()->getParent();
+        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", 0, exit_block);
+        Type* numTy = Type::getDoubleTy(ctx);
+        std::vector<Type*> powProto(2, numTy);
+        FunctionType* powType = FunctionType::get(numTy, powProto, false);
+        Function* powf = Function::Create(powType,
+            GlobalValue::ExternalLinkage, "llvm.pow.f64", mod);
+        powf->setCallingConv(CallingConv::C);
+
+        Value** PDn = new Value*[nr_phis * nr_phis];
+        for (int j = 0; j < nr_phis; ++j) {
+            Value* exptargs[] = {
+                ToConstantFP(ctx, D(j, j)), iter_final
+            };
+            Value* eigvexpt = CallInst::Create(powf,
+                ArrayRef<Value*>(exptargs), "eigvexpt", dgen);
+
+            for (int i = 0; i < nr_phis; ++i) {
+                int index = i * nr_phis + j;
+                PDn[index] = BinaryOperator::Create(Instruction::FMul,
+                    ToConstantFP(ctx, P(i, j)), eigvexpt, "pdn", dgen);
+            }
+        }
+
+        Value** PDPinv = new Value*[nr_phis * nr_phis];
+        for (int i = 0; i < nr_phis; ++i) {
+            for (int j = 0; j < nr_phis; ++j) {
+                for (int k = 0; k < nr_phis; ++k) {
+                    int idx = i * nr_phis + k;
+                    PDPinv[idx] = BinaryOperator::Create(Instruction::FMul,
+                        PDn[i * nr_phis + k], ToConstantFP(ctx, Pinv(k, j)),
+                        "pdpinv", dgen);
+                }
+            }
+        }
+
+        delete[] PDn;
+        delete[] PDPinv;
 
         /*
          * XXX:
@@ -184,50 +221,47 @@ public:
             }
         }
 
-        /* Delete all of the instructions in the loop. */
-        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
-            for (auto II = (*it)->begin(); II != (*it)->end(); ++II) {
-                Instruction* instr = II;
-                if (!isa<BranchInst>(instr)) {
-                    instr->removeFromParent();
-                }
-            }
-        }
-
-        //errs() << *blocks.back() << "\n";
-
         return false;
     }
 
 private:
     bool extractIterator(ICmpInst* icmp) {
-        /* In canonical form, LLVM should pass us an ICmp with the predicate
-         * reduced to an equality comparison. The LHS should contain the loop
-         * increment, and the RHS should be an out-of-loop value. */
+        /* In canonical form, we should get an icmp with the predicate
+         * reduced to an equality test. */
         Value *cmpLhs, *cmpRhs;
         ICmpInst::Predicate IPred;
         if (match(icmp, m_ICmp(IPred, m_Value(cmpLhs),
                                       m_Value(cmpRhs)))
             && IPred == CmpInst::Predicate::ICMP_EQ)
         {
+            /* We should be comparing against the final iterator value, which
+             * should not be found in the loop body. */
             if (isa<Instruction>(cmpRhs)) {
-                BasicBlock* BB = cast<Instruction>(cmpRhs)->getParent();
+                Instruction* instr = cast<Instruction>(cmpRhs);
+                BasicBlock* BB = instr->getParent();
                 if (!DT->properlyDominates(BB, blocks.front())) {
                     return false;
                 }
+                if (isa<Constant>(instr->getOperand(0))
+                    || isa<Instruction>(instr->getOperand(0)))
+                {
+                    return false;
+                }
+                iter_final = instr->getOperand(0);
+            } else {
+                iter_final = cmpRhs;
             }
 
+            /* Check if the loop increment is behaving as we expect it to. */
             Value *incrLhs, *incrRhs;
             if (match(cmpLhs, m_Add(m_Value(incrLhs), m_Value(incrRhs)))) {
                 if (isa<PHINode>(incrLhs)
                     && isa<ConstantInt>(incrRhs)
                     && cast<ConstantInt>(incrRhs)->isOne())
                 {
-                    iter_final = cmpRhs;
                     iter_var = cast<PHINode>(incrLhs);
                     Value* iter_initial = iter_var->getIncomingValue(0);
                     if (isa<ConstantInt>(iter_initial)) {
-                        iter_base = ToInt(iter_initial);
                         return true;
                     }
                 }
@@ -272,7 +306,7 @@ private:
                     return false;
                 }
 
-                /* Div instructions can not have scalar numerators. */
+                /* Div instructions cannot have scalar numerators. */
                 if (OP_IN_RANGE(opcode, UDiv, FDiv) && !isScalar(lhsCoeffs)) {
                     return false;
                 }
@@ -318,6 +352,10 @@ private:
         return 0.0;
     }
 
+    Value* ToConstantFP(LLVMContext& ctx, double n) {
+        return ConstantFP::get(ctx, APFloat(n));
+    }
+
     bool isScalar(Coefficients& coeffs) {
         return coeffs.size() == 0;
     }
@@ -326,8 +364,8 @@ private:
                      MatrixXcd& P, MatrixXcd& D, MatrixXcd& Pinv)
     {
         /* Ensure that there are no complex eigenvectors. */
-        for (int i=0; i < P.rows(); ++i) {
-            for (int j=0; j < P.cols(); ++j) {
+        for (int i = 0; i < P.rows(); ++i) {
+            for (int j = 0; j < P.cols(); ++j) {
                 if (std::imag(P(i, j)) != 0.0) {
                     return false;
                 }
@@ -338,7 +376,7 @@ private:
         MatrixXd A3x = A*A*A*x;
         MatrixXcd PD3Px = (P*(D*D*D)*Pinv)*x;
         const double epsilon = 100 * std::numeric_limits<double>::epsilon();
-        for (int i=0; i < x.rows(); ++i) {
+        for (int i = 0; i < x.rows(); ++i) {
             if (epsilon <
                 std::abs(std::abs(PD3Px(i, 0)) - std::abs(A3x(i, 0))))
             {
