@@ -39,7 +39,7 @@ private:
     PHINode* iter_var;
 
     /* Index and store state variables. */
-    ValueMap<PHINode*, int> phis;
+    ValueMap<PHINode*, size_t> phis;
 
     /* Track linear combinations of variables. */
     typedef ValueMap<PHINode*, double> Coefficients;
@@ -67,7 +67,7 @@ public:
         }
 
         /* Filter away loops with unsupported instructions. */
-        int nr_cmps = 0;
+        size_t nr_cmps = 0;
         ICmpInst* icmp = NULL;
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
             BasicBlock* BB = *it;
@@ -113,7 +113,7 @@ public:
             phis.erase(iter_var);
         }
 
-        int phi_index = 0;
+        size_t phi_index = 0;
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
             phis[kv->first] = phi_index++;
         }
@@ -125,7 +125,7 @@ public:
         TransformationMatrix << MatrixXd::Zero(nr_phis, nr_phis);
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
             PHINode* PN = kv->first;
-            int phi_label = phis[PN];
+            size_t phi_label = phis[PN];
             InitialState(phi_label, 0) = ToDouble(PN->getIncomingValue(0));
 
             Coefficients coeffs;
@@ -133,7 +133,7 @@ public:
                 return false;
             }
             for (auto ckv = coeffs.begin(); ckv != coeffs.end(); ++ckv) {
-                int target_phi = phis[ckv->first];
+                size_t target_phi = phis[ckv->first];
                 TransformationMatrix(phi_label, target_phi) = ckv->second;
             }
         }
@@ -159,38 +159,50 @@ public:
         powf->setCallingConv(CallingConv::C);
 
         Value** PDn = new Value*[nr_phis * nr_phis];
-        for (int j = 0; j < nr_phis; ++j) {
+        for (size_t j = 0; j < nr_phis; ++j) {
             Value* exptargs[] = {
-                ToConstantFP(ctx, D(j, j)), iter_final
+                ToConstantFP(ctx, std::real(D(j, j))), iter_final
             };
             Value* eigvexpt = CallInst::Create(powf,
-                ArrayRef<Value*>(exptargs), "eigvexpt", dgen);
+                ArrayRef<Value*>(exptargs, 2), "eigvexpt", dgen);
 
-            for (int i = 0; i < nr_phis; ++i) {
-                int index = i * nr_phis + j;
+            for (size_t i = 0; i < nr_phis; ++i) {
+                size_t index = i * nr_phis + j;
                 PDn[index] = BinaryOperator::Create(Instruction::FMul,
-                    ToConstantFP(ctx, P(i, j)), eigvexpt, "pdn", dgen);
+                    ToConstantFP(ctx, std::real(P(i, j))), eigvexpt, "pdn",
+                    dgen);
             }
         }
 
-        Value** PDPinv = new Value*[nr_phis * nr_phis];
-        for (int i = 0; i < nr_phis; ++i) {
-            for (int j = 0; j < nr_phis; ++j) {
+        Value** soln = new Value*[nr_phis];
+        for (size_t i = 0; i < nr_phis; ++i) {
+            for (size_t j = 0; j < nr_phis; ++j) {
                 Value* inprod = ToConstantFP(ctx, 0.0);
-                for (int k = 0; k < nr_phis; ++k) {
-                    int idx = i * nr_phis + k;
+                for (size_t k = 0; k < nr_phis; ++k) {
                     Value* ik_kj = BinaryOperator::Create(Instruction::FMul,
-                        PDn[i * nr_phis + k], ToConstantFP(ctx, Pinv(k, j)),
+                        PDn[i * nr_phis + k],
+                        ToConstantFP(ctx, std::real(Pinv(k, j))),
                         "ik_kj", dgen);
                     inprod = BinaryOperator::Create(Instruction::FAdd,
                         ik_kj, inprod, "inprod", dgen);
                 }
-                PDPinv[i * nr_phis + j] = inprod;
+
+                if (soln[i] == NULL) {
+                    soln[i] = inprod;
+                } else {
+                    Value* xj_prod = BinaryOperator::Create(Instruction::FMul,
+                        inprod, ToConstantFP(ctx, InitialState(j)), "pdpxj",
+                        dgen);
+                    soln[i] = BinaryOperator::Create(Instruction::FAdd, 
+                        xj_prod, soln[i], "xf", dgen);
+                }
             }
         }
 
+        errs() << dgen << "\n";
+
         delete[] PDn;
-        delete[] PDPinv;
+        delete[] soln;
 
         /*
          * XXX:
