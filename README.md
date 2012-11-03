@@ -120,5 +120,5 @@ complex eigenvalues.
 ### Acknowledgements
 
 This project makes heavy use of [Eigen]
-(http://eigen.tuxfamily.org/index.php?title=Main_Page) and [LLVM](llvm.org),
-which are both really fun to work with.
+(http://eigen.tuxfamily.org/index.php?title=Main_Page) and [LLVM](
+http://llvm.org), which are both really fun to work with.
