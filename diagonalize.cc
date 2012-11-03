@@ -14,6 +14,7 @@
 #include <Eigen/Eigenvalues>
 
 #include <iostream>
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 using namespace PatternMatch;
@@ -30,6 +31,7 @@ struct ADPass : public LoopPass
 private:
     Loop* loop;
     DominatorTree* DT;
+    BasicBlock* exit_block;
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop range. */
@@ -53,24 +55,25 @@ public:
     }
 
     virtual bool runOnLoop(Loop* L, LPPassManager&) {
-        if (!L->isLCSSAForm()
-            || L->getSubLoops().size() || !L->getUniqueExitBlock())
-        {
-            return false;
-        }
-
         loop = L;
         blocks = loop->getBlocks();
         DT = &getAnalysis<DominatorTree>();
         phis.clear();
-        
+
+        if (!loop->isLCSSAForm(*DT)
+            || loop->getSubLoops().size()
+            || !(exit_block = loop->getUniqueExitBlock()))
+        {
+            return false;
+        }
+
         /* Filter away loops with unsupported instructions. */
         int nr_cmps = 0;
         ICmpInst* icmp = NULL;
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
             BasicBlock* BB = *it;
             for (auto II = BB->begin(); II != BB->end(); ++II) {
-                Instruction* instr = static_cast<Instruction*>(II);
+                Instruction* instr = II;
                 if (isa<ICmpInst>(instr)) {
                     if (++nr_cmps > 1) {
                         return false;
@@ -115,7 +118,7 @@ public:
         for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
             phis[kv->first] = phi_index++;
         }
-        
+
         /* Find the initial state and all linear dependence relations. */
         size_t nr_phis = phis.size();
         MatrixXd InitialState(nr_phis, 1);
@@ -142,7 +145,7 @@ public:
         MatrixXcd D = EigSolver.eigenvalues().asDiagonal();
         MatrixXcd Pinv = P.inverse();
         if (!checkSystem(TransformationMatrix, InitialState, P, D, Pinv)) {
-            return false; 
+            return false;
         }
 
         std::cout << "System valid;\n";
@@ -152,7 +155,7 @@ public:
          * XXX:
          * - Do some analysis on the loop;
          *   1) What is the block we jump out to when we finish the loop?
-         *      BBTarget
+         *      exit_block
          *   2) Which PHI nodes in this block have incoming values from
          *      our loop? Store these PHI nodes: determine the state variable
          *      they refer to by examining the Value* they have incoming, and
@@ -164,6 +167,35 @@ public:
          *      results produced by the diagonalization process.
          */
 
+        /* Find dependencies on state variables outside of the loop. */
+        ValueMap<PHINode*, PHINode*> outerDeps;
+        for (auto II = exit_block->begin(); II != exit_block->end(); ++II) {
+            Instruction* instr = II;
+            if (isa<PHINode>(instr)) {
+                PHINode* PN = cast<PHINode>(instr);
+                if (PN->getBasicBlockIndex(blocks.back()) != -1) {
+                    for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
+                        if (kv->first->getIncomingValue(1) ==
+                            PN->getIncomingValueForBlock(blocks.back()))
+                        {
+                            outerDeps[PN] = kv->first;
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Delete all of the instructions in the loop. */
+        for (auto it = blocks.begin(); it != blocks.end(); ++it) {
+            for (auto II = (*it)->begin(); II != (*it)->end(); ++II) {
+                Instruction* instr = II;
+                // instr->removeFromParent();
+                errs() << "woo\n";
+            }
+        }
+
+        errs() << *blocks.back() << "\n";
+
         return false;
     }
 
@@ -173,7 +205,7 @@ private:
          * reduced to an equality comparison. The LHS should contain the loop
          * increment, and the RHS should be an out-of-loop value. */
         Value *cmpLhs, *cmpRhs;
-        ICmpInst::Predicate IPred; 
+        ICmpInst::Predicate IPred;
         if (match(icmp, m_ICmp(IPred, m_Value(cmpLhs),
                                       m_Value(cmpRhs)))
             && IPred == CmpInst::Predicate::ICMP_EQ)
@@ -253,7 +285,7 @@ private:
                 PHINode* PN = kv->first;
                 double lcoeff = lhsCoeffs.lookup(PN);
                 double rcoeff = rhsCoeffs.lookup(PN);
-                
+
                 /* Adding nil entries to 'coeffs' breaks scalarp(X). */
                 if (lcoeff == 0.0 && rcoeff == 0.0) {
                     continue;
@@ -320,6 +352,6 @@ private:
 char ADPass::ID = 0;
 
 }
- 
+
 static RegisterPass<ADPass> X("auto-diagonalize",
     "Diagonalize linear dynamical systems", false, false);
