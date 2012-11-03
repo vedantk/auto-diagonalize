@@ -160,10 +160,12 @@ public:
 
         /* P(D^n) = r * λ^n : ∀(r) ∈ row(P) */
         Value** PDn = new Value*[nr_phis * nr_phis];
+        Value* exponent = CastInst::Create(Instruction::UIToFP, iter_final,
+            numTy, "expt", dgen);
         for (size_t j = 0; j < nr_phis; ++j) {
             /* λ[j]^n */
             Value* exptargs[] = {
-                ToConstantFP(ctx, std::real(D(j, j))), iter_final
+                ToConstantFP(ctx, std::real(D(j, j))), exponent
             };
             Value* eigvexpt = CallInst::Create(powf,
                 ArrayRef<Value*>(exptargs, 2), "eigvexpt", dgen);
@@ -205,9 +207,12 @@ public:
 
         delete[] PDn;
 
-        errs() << *loop->getLoopPreheader() << "\n";
-        errs() << *exit_block << "\n";
-        errs() << *dgen << "\n";
+        /* Point outgoing edges from the loop preheader to dgen. */
+        BranchInst::Create(exit_block, dgen);
+        BasicBlock* preheader = loop->getLoopPreheader();
+        TerminatorInst* TI = preheader->getTerminator();
+        BranchInst* br = dyn_cast<BranchInst>(TI);
+        br->setSuccessor(0, dgen);
 
         /* Replace dependencies on state variables outside of the loop. */
         for (auto II = exit_block->begin(); II != exit_block->end(); ++II) {
@@ -224,20 +229,11 @@ public:
                         }
                         size_t phiIdx = phis[loopPhi];
                         exitPhi->setIncomingValue(incomingEdge, soln[phiIdx]);
+                        exitPhi->setIncomingBlock(incomingEdge, dgen);
                     }
                 }
             }
         }
-
-        /* Point outgoing edges from the loop preheader to dgen. */
-        BranchInst::Create(exit_block, dgen);
-        TerminatorInst* TI = loop->getLoopPreheader()->getTerminator();
-        BranchInst* br = dyn_cast<BranchInst>(TI);
-        br->setSuccessor(0, dgen);
-
-        errs() << *loop->getLoopPreheader() << "\n";
-        errs() << *exit_block << "\n";
-        errs() << *dgen << "\n";
 
         /* Call eraseFromParent() on every BasicBlock in the loop. */
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
