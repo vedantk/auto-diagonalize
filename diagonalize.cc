@@ -10,6 +10,8 @@
 #include "llvm/ADT/ValueMap.h"
 #include "llvm/Support/PatternMatch.h"
 
+#include "llvm/Support/raw_ostream.h"
+
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 
@@ -62,11 +64,13 @@ public:
             || !(exit_block = loop->getUniqueExitBlock())
             || !loopFilter())
         {
+            errs() << "Loop did not pass filter.\n";
             return false;
         }
 
         /* Extract the loop iterator if possible. */
         if (!extractIterator(icmp)) {
+            errs() << "Could not find loop iterator.\n";
             return false;
         } else {
             phis.erase(iter_var);
@@ -89,6 +93,7 @@ public:
 
             Coefficients coeffs;
             if (!trackUpdates(PN->getIncomingValue(1), coeffs)) {
+                errs() << "Non-linear dependencies found.\n";
                 return false;
             }
             for (auto ckv = coeffs.begin(); ckv != coeffs.end(); ++ckv) {
@@ -103,6 +108,7 @@ public:
         MatrixXcd D = EigSolver.eigenvalues().asDiagonal();
         MatrixXcd Pinv = P.inverse();
         if (!checkSystem(TransformationMatrix, InitialState, P, D, Pinv)) {
+            errs() << "Inaccurate or faulty diagonalization.\n";
             return false;
         }
 
@@ -196,7 +202,6 @@ public:
             }
         }
 
-        /* Call eraseFromParent() on every BasicBlock in the loop. */
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
             BasicBlock* BB = *it;
             BB->eraseFromParent();
@@ -302,6 +307,7 @@ private:
             /* A PHINode should contribute a single copy of itself. */
             PHINode* PN = cast<PHINode>(parent);
             if (!phis.count(PN)) {
+                errs() << "Encountered unknown PHI: " << *PN << "\n";
                 return false;
             } else {
                 coeffs[PN] = 1;
@@ -322,16 +328,22 @@ private:
             if (OP_IN_RANGE(opcode, Add, FSub)) {
                 /* Add instructions shouldn't operate on scalars. */
                 if (isScalar(lhsCoeffs) || isScalar(rhsCoeffs)) {
+                    errs() << *binop << " " << *LHS << " " << *RHS << "\n";
+                    errs() << "Scalar operand to ADD instruction.\n";
                     return false;
                 }
             } else {
                 /* Mul instructions can only have one scalar operand. */
                 if (isScalar(lhsCoeffs) ^ isScalar(rhsCoeffs)) {
+                    errs() << *binop << " " << *LHS << " " << *RHS << "\n";
+                    errs() << "Too many or few scalar operands to MUL instruction.\n";
                     return false;
                 }
 
                 /* Div instructions cannot have scalar numerators. */
                 if (OP_IN_RANGE(opcode, UDiv, FDiv) && !isScalar(lhsCoeffs)) {
+                    errs() << *binop << " " << *LHS << " " << *RHS << "\n";
+                    errs() << "DIV instruction has a scalar numerator.\n";
                     return false;
                 }
 
