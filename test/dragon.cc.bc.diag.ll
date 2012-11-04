@@ -1,10 +1,10 @@
-; ModuleID = 'dragon.cc.bc.diag'
+; ModuleID = 'test/dragon.cc.bc.diag'
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
 @.str = private unnamed_addr constant [6 x i8] c"Beep.\00", align 1
 @.str1 = private unnamed_addr constant [25 x i8] c"Usage: ./dragon <number>\00", align 1
-@.str2 = private unnamed_addr constant [17 x i8] c"dragon(%d) = %d\0A\00", align 1
+@.str2 = private unnamed_addr constant [17 x i8] c"dragon(%d) = %f\0A\00", align 1
 
 define void @_Z3fooi(i32 %n) nounwind uwtable {
   %1 = srem i32 %n, 100
@@ -21,9 +21,9 @@ define void @_Z3fooi(i32 %n) nounwind uwtable {
 
 declare i32 @puts(i8* nocapture) nounwind
 
-define i32 @_Z6dragoni(i32 %n) nounwind uwtable readnone {
+define double @_Z6dragoni(i32 %n) nounwind uwtable readnone {
   %1 = icmp slt i32 %n, 3
-  br i1 %1, label %12, label %.lr.ph
+  br i1 %1, label %._crit_edge, label %.lr.ph
 
 .lr.ph:                                           ; preds = %0
   %2 = add i32 %n, 1
@@ -155,15 +155,11 @@ define i32 @main(i32 %argc, i8** nocapture %argv) nounwind uwtable {
   %17 = fadd double %16, %c.01.i
   %18 = add nsw i32 %i.04.i, 1
   %exitcond.i = icmp eq i32 %18, %9
-  br i1 %exitcond.i, label %._crit_edge.i, label %10
+  br i1 %exitcond.i, label %_Z6dragoni.exit, label %10
 
-._crit_edge.i:                                    ; preds = %10
-  %phitmp.i = fptosi double %17 to i32
-  br label %_Z6dragoni.exit
-
-_Z6dragoni.exit:                                  ; preds = %._crit_edge.i, %4
-  %c.0.lcssa.i = phi i32 [ %phitmp.i, %._crit_edge.i ], [ 4, %4 ]
-  %19 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([17 x i8]* @.str2, i64 0, i64 0), i32 %7, i32 %c.0.lcssa.i)
+_Z6dragoni.exit:                                  ; preds = %10, %4
+  %c.0.lcssa.i = phi double [ 4.000000e+00, %4 ], [ %17, %10 ]
+  %19 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([17 x i8]* @.str2, i64 0, i64 0), i32 %7, double %c.0.lcssa.i)
   br label %20
 
 ; <label>:20                                      ; preds = %_Z6dragoni.exit, %2

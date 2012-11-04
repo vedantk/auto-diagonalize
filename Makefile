@@ -1,5 +1,5 @@
 CXX = clang++
-CXXFLAGS = -Wall -Wextra -std=c++11 -Os `llvm-config --cxxflags` \
+CXXFLAGS = -Wall -Wextra -std=c++11 `llvm-config --cxxflags` \
 	-I/usr/include/eigen3
 
 diagonalize.so: diagonalize.o
