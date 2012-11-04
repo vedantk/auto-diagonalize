@@ -8,20 +8,17 @@ void foo(int n) {
 	}
 }
 
-int dragon(int n) {
-	int a = 8;
-	int b = 4;
-	int c = 2;
+double dragon(int n) {
+    double a = 1.0;
+    double b = 2.0;
+    double c = 4.0;
 	for (int i=3; i <= n; ++i) {
-		int ap = c;
-		int bp = b + (a / 2);
-		int cp = a;
-		a = ap;
-		b = bp;
-		c = cp;
-		foo(n);
+        double tmp = a;
+        a = (.1 * b) + (.2 * c);
+        b = (tmp / 2.0) + b;
+        c = (tmp / 3.0) + c;
 	}
-	return a;
+	return c;
 }
 
 int main(int argc, char** argv) {
