@@ -334,14 +334,14 @@ private:
                 }
             } else {
                 /* Mul instructions can only have one scalar operand. */
-                if (isScalar(lhsCoeffs) ^ isScalar(rhsCoeffs)) {
+                if (!(isScalar(lhsCoeffs) ^ isScalar(rhsCoeffs))) {
                     errs() << *binop << " " << *LHS << " " << *RHS << "\n";
                     errs() << "Too many or few scalar operands to MUL instruction.\n";
                     return false;
                 }
 
                 /* Div instructions cannot have scalar numerators. */
-                if (OP_IN_RANGE(opcode, UDiv, FDiv) && !isScalar(lhsCoeffs)) {
+                if (OP_IN_RANGE(opcode, UDiv, FDiv) && isScalar(lhsCoeffs)) {
                     errs() << *binop << " " << *LHS << " " << *RHS << "\n";
                     errs() << "DIV instruction has a scalar numerator.\n";
                     return false;
