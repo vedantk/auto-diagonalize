@@ -6,7 +6,7 @@ auto-diagonalize is an optimization pass written for LLVM.
 Its purpose is to replace loops that can be modeled as linear dynamical
 systems with a closed-form representation of the system.
 
-The effect of this optimization is to to transform simple _O(n)_ processes
+The effect of this optimization is to transform simple _O(n)_ processes
 into _O(lg(n))_ processes.
 
 This is only possible if the _n x n_ transformation matrix of the system
