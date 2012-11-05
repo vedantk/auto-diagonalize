@@ -2,12 +2,6 @@
 #include <cstdlib>
 #include <cstdint>
 
-void foo(int n) {
-	if (n % 100 == 0) {
-		puts("Beep.");
-	}
-}
-
 double dragon(int n) {
     double a = 1.0;
     double b = 2.0;
