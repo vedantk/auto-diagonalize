@@ -4,6 +4,7 @@
 
 #include "llvm/Pass.h"
 #include "llvm/Function.h"
+#include "llvm/Module.h"
 #include "llvm/Constants.h"
 #include "llvm/Instructions.h"
 #include "llvm/Analysis/LoopPass.h"
@@ -34,6 +35,7 @@ private:
     /* Keep track of the loop range. */
     ICmpInst* icmp; 
     Value* iter_final;
+    ConstantInt* iter_off;
     PHINode* iter_var;
 
     /* Index and store state variables. */
@@ -66,7 +68,7 @@ public:
         }
 
         /* Extract the loop iterator if possible. */
-        if (!extractIterator(icmp)) {
+        if (!icmp || !extractIterator()) {
             return false;
         } else {
             phis.erase(iter_var);
@@ -113,16 +115,21 @@ public:
         BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", parentFunc,
             exit_block);
         Type* numTy = Type::getDoubleTy(ctx);
-        std::vector<Type*> powProto(2, numTy);
-        FunctionType* powType = FunctionType::get(numTy, powProto, false);
-        Function* powf = Function::Create(powType,
-            GlobalValue::ExternalLinkage, "llvm.pow.f64", mod);
-        powf->setCallingConv(CallingConv::C);
+        Function* powf = NULL;
+        if (!(powf = mod->getFunction("llvm.pow.f64"))) {
+            std::vector<Type*> powProto(2, numTy);
+            FunctionType* powType = FunctionType::get(numTy, powProto, false);
+            powf = Function::Create(powType, GlobalValue::ExternalLinkage,
+                "llvm.pow.f64", mod);
+            powf->setCallingConv(CallingConv::C);
+        }
 
         /* P(D^n) = r * λ^n : ∀(r) ∈ row(P) */
         Value** PDn = new Value*[nr_phis * nr_phis];
-        Value* exponent = CastInst::Create(Instruction::UIToFP, iter_final,
-            numTy, "expt", dgen);
+        Value* iexpt = BinaryOperator::Create(Instruction::Sub, iter_final,
+           iter_off, "iexpt", dgen);
+        Value* exponent = CastInst::Create(Instruction::UIToFP, iexpt, numTy,
+            "fexpt", dgen);
         for (size_t j = 0; j < nr_phis; ++j) {
             /* λ[j]^n */
             Value* exptargs[] = {
@@ -196,7 +203,7 @@ public:
             }
         }
 
-        /* Call eraseFromParent() on every BasicBlock in the loop. */
+        /* Delete the old loop. */
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
             BasicBlock* BB = *it;
             BB->eraseFromParent();
@@ -249,49 +256,28 @@ private:
         return true;
     }
 
-    bool extractIterator(ICmpInst* icmp) {
+    bool extractIterator() {
         /* In canonical form, we should get an icmp with the predicate
          * reduced to an equality test. */
-        Value *cmpLhs, *cmpRhs;
+        Value* loop_var;
+        ConstantInt* loop_incr;
         ICmpInst::Predicate IPred;
-        if (match(icmp, m_ICmp(IPred, m_Value(cmpLhs),
-                                      m_Value(cmpRhs)))
-            && IPred == CmpInst::Predicate::ICMP_EQ)
+        if (!match(icmp, m_ICmp(IPred, m_Add(m_Value(loop_var),
+                                             m_ConstantInt(loop_incr)),
+                                       m_Value(iter_final)))
+            || IPred != CmpInst::Predicate::ICMP_EQ
+            || !isa<PHINode>(loop_var)
+            || !loop_incr->isOne())
         {
-            /* We should be comparing against the final iterator value, which
-             * should not be found in the loop body. */
-            if (isa<Instruction>(cmpRhs)) {
-                Instruction* instr = cast<Instruction>(cmpRhs);
-                BasicBlock* BB = instr->getParent();
-                if (!DT->properlyDominates(BB, blocks.front())) {
-                    return false;
-                }
-                if (isa<Constant>(instr->getOperand(0))
-                    || isa<Instruction>(instr->getOperand(0)))
-                {
-                    return false;
-                }
-                iter_final = instr->getOperand(0);
-            } else {
-                iter_final = cmpRhs;
-            }
-
-            /* Check if the loop increment is behaving as we expect it to. */
-            Value *incrLhs, *incrRhs;
-            if (match(cmpLhs, m_Add(m_Value(incrLhs), m_Value(incrRhs)))) {
-                if (isa<PHINode>(incrLhs)
-                    && isa<ConstantInt>(incrRhs)
-                    && cast<ConstantInt>(incrRhs)->isOne())
-                {
-                    iter_var = cast<PHINode>(incrLhs);
-                    Value* iter_initial = iter_var->getIncomingValue(0);
-                    if (isa<ConstantInt>(iter_initial)) {
-                        return true;
-                    }
-                }
-            }
+            return false;
         }
-        return false;
+
+        /* We need to find the loop offset to determine our final exponent. */
+        iter_var = cast<PHINode>(loop_var);
+        if (!match(iter_var->getIncomingValue(0), m_ConstantInt(iter_off))) {
+            return false;
+        }
+        return true;
     }
 
     bool trackUpdates(Value* parent, Coefficients& coeffs) {
@@ -359,7 +345,9 @@ private:
                     coeffs[PN] = (1 / scalar) * (lcoeff + rcoeff);
                 }
             }
-        } else return false;
+        } else {
+            return false;
+        }
         return true;
     }
 
