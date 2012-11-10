@@ -8,7 +8,7 @@ double dragon(int n) {
     double c = 4.0;
 	for (int i=3; i <= n; ++i) {
         double tmp = a;
-        a = (.1 * b) + (.2 * c);
+        a = (.00001 * b) + (.00002 * c);
         b = (tmp / 2.0) + b;
         c = (tmp / 3.0) + c;
 	}
