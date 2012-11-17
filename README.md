@@ -66,46 +66,7 @@ dgen:                                             ; preds = %.lr.ph
 ```
 
 Through constant folding and auto-vectorization, LLVM may produce something
-even nicer. The inlined _main_ function looks like this;
-
-```
-0000000000400650 <main>:
-  400650:	50                   	push   %rax
-  400651:	83 ff 02             	cmp    $0x2,%edi
-  400654:	75 3d                	jne    400693 <main+0x43>
-  400656:	48 8b 7e 08          	mov    0x8(%rsi),%rdi
-  40065a:	e8 d1 fe ff ff       	callq  400530 <atoi@plt>
-  40065f:	83 f8 02             	cmp    $0x2,%eax
-  400662:	7c 40                	jl     4006a4 <main+0x54>
-  400664:	8d 48 ff             	lea    -0x1(%rax),%ecx
-  400667:	f2 0f 10 15 f9 00 00 	movsd  0xf9(%rip),%xmm2        # 400768 <.LCPI0_0>
-  40066e:	00 
-  40066f:	0f 28 ca             	movaps %xmm2,%xmm1
-  400672:	66 66 66 66 66 2e 0f 	data32 data32 data32 data32 nopw %cs:0x0(%rax,%rax,1)
-  400679:	1f 84 00 00 00 00 00 
-  400680:	0f 28 c2             	movaps %xmm2,%xmm0
-  400683:	f2 0f 58 c1          	addsd  %xmm1,%xmm0
-  400687:	ff c9                	dec    %ecx
-  400689:	0f 28 d1             	movaps %xmm1,%xmm2
-  40068c:	0f 28 c8             	movaps %xmm0,%xmm1
-  40068f:	75 ef                	jne    400680 <main+0x30>
-  400691:	eb 19                	jmp    4006ac <main+0x5c>
-  400693:	bf 70 07 40 00       	mov    $0x400770,%edi
-  400698:	e8 a3 fe ff ff       	callq  400540 <puts@plt>
-  40069d:	b8 01 00 00 00       	mov    $0x1,%eax
-  4006a2:	5a                   	pop    %rdx
-  4006a3:	c3                   	retq   
-  4006a4:	f2 0f 10 05 bc 00 00 	movsd  0xbc(%rip),%xmm0        # 400768 <.LCPI0_0>
-  4006ab:	00 
-  4006ac:	bf 86 07 40 00       	mov    $0x400786,%edi
-  4006b1:	89 c6                	mov    %eax,%esi
-  4006b3:	b0 01                	mov    $0x1,%al
-  4006b5:	e8 96 fe ff ff       	callq  400550 <printf@plt>
-  4006ba:	31 c0                	xor    %eax,%eax
-  4006bc:	5a                   	pop    %rdx
-  4006bd:	c3                   	retq   
-  4006be:	66 90                	xchg   %ax,%ax
-```
+even nicer.
 
 ### Limitations
 
