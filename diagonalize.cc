@@ -104,7 +104,7 @@ public:
         MatrixXcd P = EigSolver.eigenvectors();
         MatrixXcd D = EigSolver.eigenvalues().asDiagonal();
         MatrixXcd Pinv = P.inverse();
-        if (!checkSystem(TransformationMatrix, InitialState, P, D, Pinv)) {
+        if (!checkSystem(TransformationMatrix, P, D, Pinv)) {
             return false;
         }
 
@@ -372,27 +372,20 @@ private:
         return coeffs.size() == 0;
     }
 
-    bool checkSystem(MatrixXd& A, MatrixXd& x,
-                     MatrixXcd& P, MatrixXcd& D, MatrixXcd& Pinv)
+    bool checkSystem(MatrixXd& A, MatrixXcd& P,
+                     MatrixXcd& D, MatrixXcd& Pinv)
     {
-        /* Ensure that there are no complex eigenvectors. */
+        /* Check if the diagonalization worked. */
+        MatrixXcd PDPi = P*D*Pinv;
+        const double epsilon = 25 * std::numeric_limits<double>::epsilon();
         for (int i = 0; i < P.rows(); ++i) {
             for (int j = 0; j < P.cols(); ++j) {
                 if (std::imag(P(i, j)) != 0.0) {
                     return false;
                 }
-            }
-        }
-
-        /* Check that the diagonalization is reasonably accurate. */
-        MatrixXd A3x = A*A*A*x;
-        MatrixXcd PD3Px = (P*(D*D*D)*Pinv)*x;
-        const double epsilon = 100 * std::numeric_limits<double>::epsilon();
-        for (int i = 0; i < x.rows(); ++i) {
-            if (epsilon <
-                std::abs(std::abs(PD3Px(i, 0)) - std::abs(A3x(i, 0))))
-            {
-                return false;
+                if (std::abs(A(i, j) - PDPi(i, j)) . epsilon) {
+                    return false;
+                }
             }
         }
         return true;
