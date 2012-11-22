@@ -30,6 +30,7 @@ private:
     Loop* loop;
     DominatorTree* DT;
     BasicBlock* exit_block;
+    BasicBlock* dgen; 
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop range. */
@@ -59,16 +60,27 @@ public:
         DT = &getAnalysis<DominatorTree>();
         phis.clear();
 
-        if (!loop->isLCSSAForm(*DT)
-            || loop->getSubLoops().size()
+        errs() << "Current loop under consideration:\n";
+        for (auto it=blocks.begin(); it != blocks.end(); ++it) {
+            errs() << **it << "\n";
+        }
+
+        if (// !loop->isLCSSAForm(*DT)
+            loop->getSubLoops().size()
             || !(exit_block = loop->getUniqueExitBlock())
             || !loopFilter())
         {
+            errs() << "\nCurrent loop did not pass initial set of filters.\n";
+            errs() << "Perhaps loopFilter() returned false.\n";
+            errs() << "Subloops: " << loop->getSubLoops().size() << "\n"
+                    << "LCSSA: " << loop->isLCSSAForm(*DT) << "\n"
+                    << "Exit Block: " << exit_block << "\n\n";
             return false;
         }
 
         /* Extract the loop iterator if possible. */
         if (!icmp || !extractIterator()) {
+            errs() << "extractIterator() failed.\n";
             return false;
         } else {
             phis.erase(iter_var);
@@ -91,6 +103,7 @@ public:
 
             Coefficients coeffs;
             if (!trackUpdates(PN->getIncomingValue(1), coeffs)) {
+                errs() << "Non-linearities found.\n";
                 return false;
             }
             for (auto ckv = coeffs.begin(); ckv != coeffs.end(); ++ckv) {
@@ -112,8 +125,7 @@ public:
         LLVMContext& ctx = blocks.front()->getContext();
         Function* parentFunc = exit_block->getParent();
         Module* mod = parentFunc->getParent();
-        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", parentFunc,
-            exit_block);
+        dgen = BasicBlock::Create(ctx, "dgen", parentFunc, exit_block);
         Type* numTy = Type::getDoubleTy(ctx);
         Function* powf = NULL;
         if (!(powf = mod->getFunction("llvm.pow.f64"))) {
@@ -175,33 +187,21 @@ public:
 
         delete[] PDn;
 
-        /* Point outgoing edges from the loop preheader to dgen. */
-        BranchInst::Create(exit_block, dgen);
+        /* Rewire edges headed in and out of the loop. */
         BasicBlock* preheader = loop->getLoopPreheader();
         TerminatorInst* TI = preheader->getTerminator();
         BranchInst* br = dyn_cast<BranchInst>(TI);
         br->setSuccessor(0, dgen);
+        BranchInst::Create(exit_block, dgen);
 
-        /* Replace dependencies on state variables outside of the loop. */
-        for (auto II = exit_block->begin(); II != exit_block->end(); ++II) {
-            Instruction* instr = II;
-            if (isa<PHINode>(instr)) {
-                PHINode* exitPhi = cast<PHINode>(instr);
-                int incomingEdge = exitPhi->getBasicBlockIndex(blocks.back());
-                if (incomingEdge != -1) {
-                    Value* exitV = exitPhi->getIncomingValue(incomingEdge);
-                    for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-                        PHINode* loopPhi = kv->first;
-                        if (loopPhi->getIncomingValue(1) != exitV) {
-                            continue;
-                        }
-                        size_t phiIdx = phis[loopPhi];
-                        exitPhi->setIncomingValue(incomingEdge, soln[phiIdx]);
-                        exitPhi->setIncomingBlock(incomingEdge, dgen);
-                    }
-                }
-            }
+        /* Replace values leading into phi nodes. */
+        for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
+            PHINode* loopPhi = kv->first;
+            Value* incoming = loopPhi->getIncomingValue(1);
+            Value* target = soln[kv->second];
+            rewriteLiveValues(incoming, target);
         }
+        blocks.back()->replaceSuccessorsPhiUsesWith(dgen);
 
         /* Delete the old loop. */
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
@@ -225,6 +225,7 @@ private:
                 Instruction* instr = II;
                 if (isa<ICmpInst>(instr)) {
                     if (++nr_cmps > 1) {
+                        errs() << "Too many cmps.\n";
                         return false;
                     } else {
                         icmp = cast<ICmpInst>(instr);
@@ -235,10 +236,12 @@ private:
                         || !DT->properlyDominates(PN->getIncomingBlock(0),
                                                   blocks.front()))
                     {
+                        errs() << "PHINode does not dominate?\n";
                         return false;
                     }
                     Value* inLhs = PN->getIncomingValue(0);
                     if (!(isa<ConstantInt>(inLhs) || isa<ConstantFP>(inLhs))) {
+                        errs() << "PHINode not a constant.\n";
                         return false;
                     } else {
                         phis[PN] = 0;
@@ -246,9 +249,11 @@ private:
                 } else if (isa<BinaryOperator>(instr)) {
                     BinaryOperator* binop = cast<BinaryOperator>(instr);
                     if (!(OP_IN_RANGE(binop->getOpcode(), Add, FDiv))) {
+                        errs() << "Invalid binary operator.\n";
                         return false;
                     }
                 } else if (!isa<BranchInst>(instr)) {
+                    errs() << "Not a valid 'other' branch.\n";
                     return false;
                 }
             }
@@ -396,6 +401,49 @@ private:
             }
         }
         return true;
+    }
+
+    void rewriteLiveValues(Value* oldval, Value* target) {
+        /* Values that lead into the state variables may remain live after
+         * the end of this loop, so we set them to the solution. */
+        for (auto UI = oldval->use_begin(); UI != oldval->use_end(); ++UI)
+        {
+            User* user = *UI;
+            if (isPartialComputation(user)) {
+                continue;
+            }
+
+            if (isa<PHINode>(user)) {
+                PHINode* userPhi = cast<PHINode>(user);
+                for (unsigned i=0; i < userPhi->getNumIncomingValues(); ++i) {
+                    if (userPhi->getIncomingValue(i) == oldval) {
+                        userPhi->setIncomingValue(i, target);
+                        userPhi->setIncomingBlock(i, dgen);
+                    }
+                }
+                continue;
+            }
+
+            for (auto op = user->op_begin(); op != user->op_end(); ++op) {
+                Use& phiUse = *op;
+                Value* operand = phiUse.get();
+                if (operand == oldval) {
+                    phiUse.set(target);
+                }
+            }
+        }
+    }
+
+    bool isPartialComputation(Value* target) {
+        /* Check if the target value is defined in the loop body. */
+        BasicBlock* BB = blocks.front();
+        for (auto II = BB->begin(); II != BB->end(); ++II) {
+            Instruction* instr = II;
+            if (instr == target) {
+                return true;
+            }
+        }
+        return false;
     }
 };
 
