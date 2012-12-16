@@ -73,7 +73,7 @@ _Z3fibi.exit.us:                                  ; preds = %_Z3fibi.exit.us, %4
   %i.01.us = phi i32 [ %11, %_Z3fibi.exit.us ], [ 0, %4 ]
   %10 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double 1.000000e+00)
   %11 = add nsw i32 %i.01.us, 1
-  %exitcond = icmp eq i32 %11, 10000
+  %exitcond = icmp eq i32 %11, 10001
   br i1 %exitcond, label %.loopexit, label %_Z3fibi.exit.us
 
 .lr.ph.i:                                         ; preds = %_Z3fibi.exit, %4
@@ -83,13 +83,13 @@ _Z3fibi.exit.us:                                  ; preds = %_Z3fibi.exit.us, %4
 dgen:                                             ; preds = %.lr.ph.i
   %iexpt = sub i32 %9, 2
   %fexpt = uitofp i32 %iexpt to double
-  %eigvexpt = call double @llvm.pow.f64(double 0xBFE3C6EF372FE94E, double %fexpt)
-  %pdn = fmul double 0xBFEB38880B4603E6, %eigvexpt
+  %eigvexpt = call double @llvm.pow.f64(double 0x3FF9E3779B97F4A6, double %fexpt)
+  %pdn = fmul double 0x3FEB38880B4603E6, %eigvexpt
   %pdn1 = fmul double 0x3FE0D2CA0DA1530D, %eigvexpt
-  %eigvexpt2 = call double @llvm.pow.f64(double 0x3FF9E3779B97F4A6, double %fexpt)
-  %pdn3 = fmul double 0xBFE0D2CA0DA1530E, %eigvexpt2
-  %pdn4 = fmul double 0xBFEB38880B4603E6, %eigvexpt2
-  %ik_kj = fmul double %pdn, 0xBFEB38880B4603E3
+  %eigvexpt2 = call double @llvm.pow.f64(double 0xBFE3C6EF372FE94E, double %fexpt)
+  %pdn3 = fmul double 0xBFE0D2CA0DA1530D, %eigvexpt2
+  %pdn4 = fmul double 0x3FEB38880B4603E6, %eigvexpt2
+  %ik_kj = fmul double %pdn, 0x3FEB38880B4603E4
   %dotp = fadd double %ik_kj, 0.000000e+00
   %ik_kj5 = fmul double %pdn3, 0xBFE0D2CA0DA1530C
   %dotp6 = fadd double %ik_kj5, %dotp
@@ -97,11 +97,11 @@ dgen:                                             ; preds = %.lr.ph.i
   %xf = fadd double %pdpxj, 0.000000e+00
   %ik_kj7 = fmul double %pdn, 0x3FE0D2CA0DA1530D
   %dotp8 = fadd double %ik_kj7, 0.000000e+00
-  %ik_kj9 = fmul double %pdn3, 0xBFEB38880B4603E5
+  %ik_kj9 = fmul double %pdn3, 0x3FEB38880B4603E5
   %dotp10 = fadd double %ik_kj9, %dotp8
   %pdpxj11 = fmul double %dotp10, 1.000000e+00
   %xf12 = fadd double %pdpxj11, %xf
-  %ik_kj13 = fmul double %pdn1, 0xBFEB38880B4603E3
+  %ik_kj13 = fmul double %pdn1, 0x3FEB38880B4603E4
   %dotp14 = fadd double %ik_kj13, 0.000000e+00
   %ik_kj15 = fmul double %pdn4, 0xBFE0D2CA0DA1530C
   %dotp16 = fadd double %ik_kj15, %dotp14
@@ -109,16 +109,16 @@ dgen:                                             ; preds = %.lr.ph.i
   %xf18 = fadd double %pdpxj17, 0.000000e+00
   %ik_kj19 = fmul double %pdn1, 0x3FE0D2CA0DA1530D
   %dotp20 = fadd double %ik_kj19, 0.000000e+00
-  %ik_kj21 = fmul double %pdn4, 0xBFEB38880B4603E5
+  %ik_kj21 = fmul double %pdn4, 0x3FEB38880B4603E5
   %dotp22 = fadd double %ik_kj21, %dotp20
   %pdpxj23 = fmul double %dotp22, 1.000000e+00
   %xf24 = fadd double %pdpxj23, %xf18
   br label %_Z3fibi.exit
 
 _Z3fibi.exit:                                     ; preds = %dgen
-  %12 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double %xf24)
+  %12 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double %xf12)
   %13 = add nsw i32 %i.01, 1
-  %exitcond2 = icmp eq i32 %13, 10000
+  %exitcond2 = icmp eq i32 %13, 10001
   br i1 %exitcond2, label %.loopexit, label %.lr.ph.i
 
 .loopexit:                                        ; preds = %_Z3fibi.exit, %_Z3fibi.exit.us, %2

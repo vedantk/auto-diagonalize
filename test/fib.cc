@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     }
     
     int n = atoi(argv[1]);
-    for (int i=0; i < 10000; ++i) {
+    for (int i=0; i < 10001; ++i) {
         printf("fib(%d) = %lf\n", n, fib(n));
     }
     

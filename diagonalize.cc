@@ -60,27 +60,15 @@ public:
         DT = &getAnalysis<DominatorTree>();
         phis.clear();
 
-        errs() << "Current loop under consideration:\n";
-        for (auto it=blocks.begin(); it != blocks.end(); ++it) {
-            errs() << **it << "\n";
-        }
-
-        if (// !loop->isLCSSAForm(*DT)
-            loop->getSubLoops().size()
+        if (loop->getSubLoops().size()
             || !(exit_block = loop->getUniqueExitBlock())
             || !loopFilter())
         {
-            errs() << "\nCurrent loop did not pass initial set of filters.\n";
-            errs() << "Perhaps loopFilter() returned false.\n";
-            errs() << "Subloops: " << loop->getSubLoops().size() << "\n"
-                    << "LCSSA: " << loop->isLCSSAForm(*DT) << "\n"
-                    << "Exit Block: " << exit_block << "\n\n";
             return false;
         }
 
         /* Extract the loop iterator if possible. */
         if (!icmp || !extractIterator()) {
-            errs() << "extractIterator() failed.\n";
             return false;
         } else {
             phis.erase(iter_var);
@@ -103,7 +91,6 @@ public:
 
             Coefficients coeffs;
             if (!trackUpdates(PN->getIncomingValue(1), coeffs)) {
-                errs() << "Non-linearities found.\n";
                 return false;
             }
             for (auto ckv = coeffs.begin(); ckv != coeffs.end(); ++ckv) {
@@ -225,7 +212,6 @@ private:
                 Instruction* instr = II;
                 if (isa<ICmpInst>(instr)) {
                     if (++nr_cmps > 1) {
-                        errs() << "Too many cmps.\n";
                         return false;
                     } else {
                         icmp = cast<ICmpInst>(instr);
@@ -236,12 +222,10 @@ private:
                         || !DT->properlyDominates(PN->getIncomingBlock(0),
                                                   blocks.front()))
                     {
-                        errs() << "PHINode does not dominate?\n";
                         return false;
                     }
                     Value* inLhs = PN->getIncomingValue(0);
                     if (!(isa<ConstantInt>(inLhs) || isa<ConstantFP>(inLhs))) {
-                        errs() << "PHINode not a constant.\n";
                         return false;
                     } else {
                         phis[PN] = 0;
@@ -249,11 +233,9 @@ private:
                 } else if (isa<BinaryOperator>(instr)) {
                     BinaryOperator* binop = cast<BinaryOperator>(instr);
                     if (!(OP_IN_RANGE(binop->getOpcode(), Add, FDiv))) {
-                        errs() << "Invalid binary operator.\n";
                         return false;
                     }
                 } else if (!isa<BranchInst>(instr)) {
-                    errs() << "Not a valid 'other' branch.\n";
                     return false;
                 }
             }
@@ -388,7 +370,7 @@ private:
                 if (std::imag(P(i, j)) != 0.0) {
                     return false;
                 }
-                if (std::abs(A(i, j) - PDPi(i, j)) . epsilon) {
+                if (std::abs(A(i, j) - PDPi(i, j)) > epsilon) {
                     return false;
                 }
             }
