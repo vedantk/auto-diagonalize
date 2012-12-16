@@ -1,4 +1,4 @@
-; ModuleID = 'test/fib.cc.bc'
+; ModuleID = 'fib.cc.bc'
 target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v64:64:64-v128:128:128-a0:0:64-s0:64:64-f80:128:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
@@ -33,35 +33,44 @@ define i32 @main(i32 %argc, i8** nocapture %argv) nounwind uwtable {
 
 ; <label>:2                                       ; preds = %0
   %3 = tail call i32 @puts(i8* getelementptr inbounds ([22 x i8]* @.str, i64 0, i64 0))
-  br label %14
+  br label %.loopexit
 
 ; <label>:4                                       ; preds = %0
   %5 = getelementptr inbounds i8** %argv, i64 1
   %6 = load i8** %5, align 8, !tbaa !0
   %7 = tail call i32 @atoi(i8* %6) nounwind readonly
   %8 = icmp slt i32 %7, 2
-  br i1 %8, label %_Z3fibi.exit, label %.lr.ph.i
-
-.lr.ph.i:                                         ; preds = %4
   %9 = add i32 %7, 1
-  br label %10
+  br i1 %8, label %_Z3fibi.exit.us, label %.lr.ph.i
 
-; <label>:10                                      ; preds = %10, %.lr.ph.i
-  %i.03.i = phi i32 [ 2, %.lr.ph.i ], [ %12, %10 ]
-  %a.02.i = phi double [ 1.000000e+00, %.lr.ph.i ], [ %b.01.i, %10 ]
-  %b.01.i = phi double [ 1.000000e+00, %.lr.ph.i ], [ %11, %10 ]
-  %11 = fadd double %a.02.i, %b.01.i
-  %12 = add nsw i32 %i.03.i, 1
-  %exitcond.i = icmp eq i32 %12, %9
-  br i1 %exitcond.i, label %_Z3fibi.exit, label %10
+_Z3fibi.exit.us:                                  ; preds = %_Z3fibi.exit.us, %4
+  %i.01.us = phi i32 [ %11, %_Z3fibi.exit.us ], [ 0, %4 ]
+  %10 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double 1.000000e+00)
+  %11 = add nsw i32 %i.01.us, 1
+  %exitcond = icmp eq i32 %11, 10000
+  br i1 %exitcond, label %.loopexit, label %_Z3fibi.exit.us
 
-_Z3fibi.exit:                                     ; preds = %10, %4
-  %b.0.lcssa.i = phi double [ 1.000000e+00, %4 ], [ %11, %10 ]
-  %13 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double %b.0.lcssa.i)
-  br label %14
+.lr.ph.i:                                         ; preds = %_Z3fibi.exit, %4
+  %i.01 = phi i32 [ %16, %_Z3fibi.exit ], [ 0, %4 ]
+  br label %12
 
-; <label>:14                                      ; preds = %_Z3fibi.exit, %2
-  %.0 = phi i32 [ 1, %2 ], [ 0, %_Z3fibi.exit ]
+; <label>:12                                      ; preds = %12, %.lr.ph.i
+  %i.03.i = phi i32 [ 2, %.lr.ph.i ], [ %14, %12 ]
+  %a.02.i = phi double [ 1.000000e+00, %.lr.ph.i ], [ %b.01.i, %12 ]
+  %b.01.i = phi double [ 1.000000e+00, %.lr.ph.i ], [ %13, %12 ]
+  %13 = fadd double %a.02.i, %b.01.i
+  %14 = add nsw i32 %i.03.i, 1
+  %exitcond.i = icmp eq i32 %14, %9
+  br i1 %exitcond.i, label %_Z3fibi.exit, label %12
+
+_Z3fibi.exit:                                     ; preds = %12
+  %15 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double %13)
+  %16 = add nsw i32 %i.01, 1
+  %exitcond2 = icmp eq i32 %16, 10000
+  br i1 %exitcond2, label %.loopexit, label %.lr.ph.i
+
+.loopexit:                                        ; preds = %_Z3fibi.exit, %_Z3fibi.exit.us, %2
+  %.0 = phi i32 [ 1, %2 ], [ 0, %_Z3fibi.exit ], [ 0, %_Z3fibi.exit.us ]
   ret i32 %.0
 }
 

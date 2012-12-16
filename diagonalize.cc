@@ -30,6 +30,7 @@ private:
     Loop* loop;
     DominatorTree* DT;
     BasicBlock* exit_block;
+    BasicBlock* dgen; 
     std::vector<BasicBlock*> blocks;
 
     /* Keep track of the loop range. */
@@ -59,8 +60,7 @@ public:
         DT = &getAnalysis<DominatorTree>();
         phis.clear();
 
-        if (!loop->isLCSSAForm(*DT)
-            || loop->getSubLoops().size()
+        if (loop->getSubLoops().size()
             || !(exit_block = loop->getUniqueExitBlock())
             || !loopFilter())
         {
@@ -104,7 +104,7 @@ public:
         MatrixXcd P = EigSolver.eigenvectors();
         MatrixXcd D = EigSolver.eigenvalues().asDiagonal();
         MatrixXcd Pinv = P.inverse();
-        if (!checkSystem(TransformationMatrix, InitialState, P, D, Pinv)) {
+        if (!checkSystem(TransformationMatrix, P, D, Pinv)) {
             return false;
         }
 
@@ -112,8 +112,7 @@ public:
         LLVMContext& ctx = blocks.front()->getContext();
         Function* parentFunc = exit_block->getParent();
         Module* mod = parentFunc->getParent();
-        BasicBlock* dgen = BasicBlock::Create(ctx, "dgen", parentFunc,
-            exit_block);
+        dgen = BasicBlock::Create(ctx, "dgen", parentFunc, exit_block);
         Type* numTy = Type::getDoubleTy(ctx);
         Function* powf = NULL;
         if (!(powf = mod->getFunction("llvm.pow.f64"))) {
@@ -175,33 +174,21 @@ public:
 
         delete[] PDn;
 
-        /* Point outgoing edges from the loop preheader to dgen. */
-        BranchInst::Create(exit_block, dgen);
+        /* Rewire edges headed in and out of the loop. */
         BasicBlock* preheader = loop->getLoopPreheader();
         TerminatorInst* TI = preheader->getTerminator();
         BranchInst* br = dyn_cast<BranchInst>(TI);
         br->setSuccessor(0, dgen);
+        BranchInst::Create(exit_block, dgen);
 
-        /* Replace dependencies on state variables outside of the loop. */
-        for (auto II = exit_block->begin(); II != exit_block->end(); ++II) {
-            Instruction* instr = II;
-            if (isa<PHINode>(instr)) {
-                PHINode* exitPhi = cast<PHINode>(instr);
-                int incomingEdge = exitPhi->getBasicBlockIndex(blocks.back());
-                if (incomingEdge != -1) {
-                    Value* exitV = exitPhi->getIncomingValue(incomingEdge);
-                    for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
-                        PHINode* loopPhi = kv->first;
-                        if (loopPhi->getIncomingValue(1) != exitV) {
-                            continue;
-                        }
-                        size_t phiIdx = phis[loopPhi];
-                        exitPhi->setIncomingValue(incomingEdge, soln[phiIdx]);
-                        exitPhi->setIncomingBlock(incomingEdge, dgen);
-                    }
-                }
-            }
+        /* Replace values leading into phi nodes. */
+        for (auto kv = phis.begin(); kv != phis.end(); ++kv) {
+            PHINode* loopPhi = kv->first;
+            Value* incoming = loopPhi->getIncomingValue(1);
+            Value* target = soln[kv->second];
+            rewriteLiveValues(incoming, target);
         }
+        blocks.back()->replaceSuccessorsPhiUsesWith(dgen);
 
         /* Delete the old loop. */
         for (auto it = blocks.begin(); it != blocks.end(); ++it) {
@@ -372,30 +359,66 @@ private:
         return coeffs.size() == 0;
     }
 
-    bool checkSystem(MatrixXd& A, MatrixXd& x,
-                     MatrixXcd& P, MatrixXcd& D, MatrixXcd& Pinv)
+    bool checkSystem(MatrixXd& A, MatrixXcd& P,
+                     MatrixXcd& D, MatrixXcd& Pinv)
     {
-        /* Ensure that there are no complex eigenvectors. */
+        /* Check if the diagonalization worked. */
+        MatrixXcd PDPi = P*D*Pinv;
+        const double epsilon = 25 * std::numeric_limits<double>::epsilon();
         for (int i = 0; i < P.rows(); ++i) {
             for (int j = 0; j < P.cols(); ++j) {
                 if (std::imag(P(i, j)) != 0.0) {
                     return false;
                 }
-            }
-        }
-
-        /* Check that the diagonalization is reasonably accurate. */
-        MatrixXd A3x = A*A*A*x;
-        MatrixXcd PD3Px = (P*(D*D*D)*Pinv)*x;
-        const double epsilon = 100 * std::numeric_limits<double>::epsilon();
-        for (int i = 0; i < x.rows(); ++i) {
-            if (epsilon <
-                std::abs(std::abs(PD3Px(i, 0)) - std::abs(A3x(i, 0))))
-            {
-                return false;
+                if (std::abs(A(i, j) - PDPi(i, j)) > epsilon) {
+                    return false;
+                }
             }
         }
         return true;
+    }
+
+    void rewriteLiveValues(Value* oldval, Value* target) {
+        /* Values that lead into the state variables may remain live after
+         * the end of this loop, so we set them to the solution. */
+        for (auto UI = oldval->use_begin(); UI != oldval->use_end(); ++UI)
+        {
+            User* user = *UI;
+            if (isPartialComputation(user)) {
+                continue;
+            }
+
+            if (isa<PHINode>(user)) {
+                PHINode* userPhi = cast<PHINode>(user);
+                for (unsigned i=0; i < userPhi->getNumIncomingValues(); ++i) {
+                    if (userPhi->getIncomingValue(i) == oldval) {
+                        userPhi->setIncomingValue(i, target);
+                        userPhi->setIncomingBlock(i, dgen);
+                    }
+                }
+                continue;
+            }
+
+            for (auto op = user->op_begin(); op != user->op_end(); ++op) {
+                Use& phiUse = *op;
+                Value* operand = phiUse.get();
+                if (operand == oldval) {
+                    phiUse.set(target);
+                }
+            }
+        }
+    }
+
+    bool isPartialComputation(Value* target) {
+        /* Check if the target value is defined in the loop body. */
+        BasicBlock* BB = blocks.front();
+        for (auto II = BB->begin(); II != BB->end(); ++II) {
+            Instruction* instr = II;
+            if (instr == target) {
+                return true;
+            }
+        }
+        return false;
     }
 };
 

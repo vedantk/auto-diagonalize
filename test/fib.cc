@@ -14,12 +14,15 @@ double fib(int n) {
 }
 
 int main(int argc, char** argv) {
-	if (argc != 2) {
-		puts("Usage: ./fib <number>");
-		return 1;
-	}
-
-	int n = atoi(argv[1]);
-	printf("fib(%d) = %lf\n", n, fib(n));
-	return 0;
+    if (argc != 2) {
+    	puts("Usage: ./fib <number>");
+    	return 1;
+    }
+    
+    int n = atoi(argv[1]);
+    for (int i=0; i < 10001; ++i) {
+        printf("fib(%d) = %lf\n", n, fib(n));
+    }
+    
+    return 0;
 }
