@@ -64,24 +64,25 @@ define i32 @main(i32 %argc, i8** nocapture %argv) nounwind uwtable {
 ; <label>:4                                       ; preds = %0
   %5 = getelementptr inbounds i8** %argv, i64 1
   %6 = load i8** %5, align 8, !tbaa !0
-  %7 = tail call i32 @atoi(i8* %6) nounwind readonly
-  %8 = icmp slt i32 %7, 2
-  %9 = add i32 %7, 1
-  br i1 %8, label %_Z3fibi.exit.us, label %.lr.ph.i
+  %7 = tail call i64 @strtol(i8* nocapture %6, i8** null, i32 10) nounwind
+  %8 = trunc i64 %7 to i32
+  %9 = icmp slt i32 %8, 2
+  %10 = add i32 %8, 1
+  br i1 %9, label %_Z3fibi.exit.us, label %.lr.ph.i
 
 _Z3fibi.exit.us:                                  ; preds = %_Z3fibi.exit.us, %4
-  %i.01.us = phi i32 [ %11, %_Z3fibi.exit.us ], [ 0, %4 ]
-  %10 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double 1.000000e+00)
-  %11 = add nsw i32 %i.01.us, 1
-  %exitcond = icmp eq i32 %11, 10001
-  br i1 %exitcond, label %.loopexit, label %_Z3fibi.exit.us
+  %i.05.us = phi i32 [ %12, %_Z3fibi.exit.us ], [ 0, %4 ]
+  %11 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %8, double 1.000000e+00)
+  %12 = add nsw i32 %i.05.us, 1
+  %exitcond6 = icmp eq i32 %12, 10001
+  br i1 %exitcond6, label %.loopexit, label %_Z3fibi.exit.us
 
 .lr.ph.i:                                         ; preds = %_Z3fibi.exit, %4
-  %i.01 = phi i32 [ %13, %_Z3fibi.exit ], [ 0, %4 ]
+  %i.05 = phi i32 [ %14, %_Z3fibi.exit ], [ 0, %4 ]
   br label %dgen
 
 dgen:                                             ; preds = %.lr.ph.i
-  %iexpt = sub i32 %9, 2
+  %iexpt = sub i32 %10, 2
   %fexpt = uitofp i32 %iexpt to double
   %eigvexpt = call double @llvm.pow.f64(double 0x3FF9E3779B97F4A6, double %fexpt)
   %pdn = fmul double 0x3FEB38880B4603E6, %eigvexpt
@@ -116,10 +117,10 @@ dgen:                                             ; preds = %.lr.ph.i
   br label %_Z3fibi.exit
 
 _Z3fibi.exit:                                     ; preds = %dgen
-  %12 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %7, double %xf12)
-  %13 = add nsw i32 %i.01, 1
-  %exitcond2 = icmp eq i32 %13, 10001
-  br i1 %exitcond2, label %.loopexit, label %.lr.ph.i
+  %13 = tail call i32 (i8*, ...)* @printf(i8* getelementptr inbounds ([15 x i8]* @.str1, i64 0, i64 0), i32 %8, double %xf12)
+  %14 = add nsw i32 %i.05, 1
+  %exitcond = icmp eq i32 %14, 10001
+  br i1 %exitcond, label %.loopexit, label %.lr.ph.i
 
 .loopexit:                                        ; preds = %_Z3fibi.exit, %_Z3fibi.exit.us, %2
   %.0 = phi i32 [ 1, %2 ], [ 0, %_Z3fibi.exit ], [ 0, %_Z3fibi.exit.us ]
@@ -128,9 +129,9 @@ _Z3fibi.exit:                                     ; preds = %dgen
 
 declare i32 @puts(i8* nocapture) nounwind
 
-declare i32 @atoi(i8* nocapture) nounwind readonly
-
 declare i32 @printf(i8* nocapture, ...) nounwind
+
+declare i64 @strtol(i8*, i8** nocapture, i32) nounwind
 
 declare double @llvm.pow.f64(double, double) nounwind readonly
 
