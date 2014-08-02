@@ -3,10 +3,10 @@
  */
 
 #include "llvm/Pass.h"
-#include "llvm/Function.h"
-#include "llvm/Module.h"
-#include "llvm/Constants.h"
-#include "llvm/Instructions.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/ADT/ValueMap.h"
 #include "llvm/Support/PatternMatch.h"
@@ -142,7 +142,7 @@ public:
                 size_t index = i * nr_phis + j;
                 PDn[index] = BinaryOperator::Create(Instruction::FMul,
                     ToConstantFP(ctx, std::real(P(i, j))), eigvexpt, "pdn",
-                    dgen);
+                                 dgen);
             }
         }
 
