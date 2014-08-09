@@ -13,7 +13,7 @@ This is only possible if the _n x n_ transformation matrix of the system
 has _n_ linearly independent eigenvectors.
 
 There's a short paper about auto-diagonalize which goes into more detail
-[here](http://net.vedantk.com/static/loop-tx.pdf).
+[here](https://github.com/vedantk/auto-diagonalize/blob/master/doc/loop-tx.pdf?raw=true).
 
 ### The Fibonacci Example
 
