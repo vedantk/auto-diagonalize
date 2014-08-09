@@ -18,9 +18,9 @@ The eigenvalue equation $Mv = \lambda v$ is a powerful statement about
 matrix and scalar multiplications. In the context of compiler optimization,
 we can use it to transform linearizable loops which run in $O(n)$ steps into
 matrix operations which run in $O(\log n)$ steps.  This paper defines loop
-diagonalization (the process of rewriting linearizable loops as efficient
-eigendecompositions), discusses the implementation of this optimization with
-LLVM, and discusses the advantages and limitations of this method.
+diagonalization (the process of rewriting linearizable loops as two
+matrix multiplies), discusses the implementation of this optimization
+with LLVM, and discusses the advantages and limitations of this method.
 
 \section{Overview}
 
@@ -166,7 +166,7 @@ infrastructure. This involved creating an instance of
 \texttt{llvm::LoopPass} (\texttt{ADPass}) which can be loaded from a dynamic
 library. \texttt{ADPass} determines if a loop is linearizable by filtering
 out unsupported instructions. It then builds the loop matrix $M$ by
-performing a depth-first search on the exit phi-nodes in the loop. This
+performing a depth-first search on the phi-nodes in the loop. This
 search allows the pass to determine the coefficients of every linear
 combination of $v$ in the loop, which are exactly the entries of $M$. Next,
 the pass uses the \texttt{Eigen} library to find the eigendecomposition of
